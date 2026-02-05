@@ -115,7 +115,40 @@ ClwDimswex Class
           Properties: EventId, Index, Load
 ```
 
-### 3. Exploring a Namespace
+### 3. Following Property Return Types
+
+The `api` command also works with properties and methods:
+
+```bash
+# See what type a property returns and its members
+./chm api LoadEventArgs Load
+```
+
+Output:
+```
+LoadEventArgs Class
+  └─> Load Property
+      Signature: public LightLoad Load { get; }
+    └─> LightLoad Class
+        Properties: DeviceLoadIsOn, Number, Parent, Type, ...
+```
+
+### 4. Looking Up Constant Fields
+
+```bash
+# Find constant values and their documentation
+./chm api LoadEventIds LevelChangeEventId
+./chm inspect "LoadEventIds.LevelChangeEventId"
+```
+
+Output:
+```
+LoadEventIds.LevelChangeEventId Field
+  Signature: public const int LevelChangeEventId = 7
+  Description: The level of the load changed.
+```
+
+### 5. Exploring a Namespace
 
 ```bash
 # List available namespaces
@@ -125,7 +158,7 @@ ClwDimswex Class
 ./chm browse "Crestron.SimplSharp.Net.Http" --limit 100
 ```
 
-### 4. Deep Type Inspection
+### 6. Deep Type Inspection
 
 Use `traverse` to recursively explore type relationships:
 
@@ -133,7 +166,7 @@ Use `traverse` to recursively explore type relationships:
 ./chm traverse "LoadEventHandler" --depth 3
 ```
 
-### 5. Reading Full Documentation
+### 7. Reading Full Documentation
 
 ```bash
 # Get the path from search/inspect results, then read
