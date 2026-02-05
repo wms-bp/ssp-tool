@@ -61,6 +61,25 @@ A CLI tool for searching and navigating CHM (Compiled HTML Help) documentation f
 ./chm traverse LoadEventHandler --depth 3
 ```
 
+### Code Example Commands
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `examples [namespace]` | `ex` | List documents with code examples |
+| `example <type>` | `eg` | Get code example from a document |
+| `examples-summary` | `exs` | Show count of examples by namespace |
+
+```bash
+# List all documents with examples in a namespace
+./chm examples "Crestron.SimplSharpPro.Lighting"
+
+# Get a specific code example
+./chm example "Din1Dim4 Class"
+
+# See which namespaces have examples
+./chm examples-summary
+```
+
 ### Navigation Commands
 
 | Command | Alias | Description |
@@ -173,6 +192,39 @@ Use `traverse` to recursively explore type relationships:
 ./chm show html/e6dae853-e52a-aea1-01e7-aa7dd979a343.htm
 ```
 
+### 8. Finding Code Examples
+
+The SDK contains ~1000+ code examples. Use these commands to find implementation guidance:
+
+```bash
+# See which namespaces have examples
+./chm examples-summary
+
+# List examples in a specific namespace
+./chm examples "Crestron.SimplSharpPro.Lighting"
+
+# Get the example code for a class
+./chm example "Din1Dim4 Class"
+```
+
+When inspecting a type, the tool will indicate if it has an example:
+```
+*** This document has a CODE EXAMPLE ***
+    Use: ./chm example "Din1Dim4 Class"
+```
+
+Example output shows actual C# implementation code:
+```csharp
+// Register the device within the constructor or InitializeSystem function
+public ControlSystem() : base()
+{
+    myDin1Dim4 = new Din1Dim4(0x89, this);
+    myDin1Dim4.OverrideEventHandler += new OverrideHandler(OverrideEventHandler);
+    myDin1Dim4.OnlineStatusChange += new OnlineStatusChangeEventHandler(OnlineStatusChangeCallback);
+    // ...
+}
+```
+
 ## JSON Output
 
 All commands support `--json` flag for programmatic access:
@@ -268,6 +320,10 @@ Many classes inherit from base classes. When a member isn't found on a class dir
 5. **Inspect return types**: When a method returns a custom type, use `inspect` on that type to understand it
 
 6. **Path references**: All commands that show paths can be fed to `./chm show <path>` for full documentation
+
+7. **Look for examples first**: When implementing a device, check if it has a code example with `./chm example "ClassName"` - examples show real-world usage patterns
+
+8. **Browse examples by namespace**: Use `./chm examples "Crestron.SimplSharpPro.Lighting"` to find similar device implementations
 
 ## Cache Location
 
