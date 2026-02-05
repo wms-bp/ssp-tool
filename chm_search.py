@@ -149,22 +149,22 @@ def extract_parameters(html_content: str) -> list:
 
 def extract_return_type(html_content: str) -> Optional[dict]:
     """Extract return type information."""
-    # Look for Value section (for events/properties) or Return Value section
-    match = re.search(r'<h4>Value</h4>\s*<a href="([^"]+)">([^<]+)</a>', html_content)
-    if match:
-        href = match.group(1)
-        return {
-            'path': f'html/{href}' if not href.startswith('http') else None,
-            'name': html.unescape(match.group(2).strip())
-        }
+    # Look for Value section (for events), Property Value, or Return Value section
+    patterns = [
+        r'<h4>Value</h4>\s*<a href="([^"]+)">([^<]+)</a>',
+        r'<h4>Property Value</h4>\s*<a href="([^"]+)">([^<]+)</a>',
+        r'<h4>Field Value</h4>\s*<a href="([^"]+)">([^<]+)</a>',
+        r'<h4>Return Value</h4>.*?<a href="([^"]+)">([^<]+)</a>',
+    ]
 
-    match = re.search(r'<h4>Return Value</h4>.*?<a href="([^"]+)">([^<]+)</a>', html_content, re.DOTALL)
-    if match:
-        href = match.group(1)
-        return {
-            'path': f'html/{href}' if not href.startswith('http') else None,
-            'name': html.unescape(match.group(2).strip())
-        }
+    for pattern in patterns:
+        match = re.search(pattern, html_content, re.DOTALL)
+        if match:
+            href = match.group(1)
+            return {
+                'path': f'html/{href}' if not href.startswith('http') else None,
+                'name': html.unescape(match.group(2).strip())
+            }
 
     return None
 
@@ -583,19 +583,19 @@ class CHMSearch:
             path, title, help_id = row
             entry = {'path': path, 'title': title}
 
-            # Categorize by type
-            title_lower = title.lower()
-            if 'constructor' in title_lower:
+            # Categorize by type - check specific suffixes to avoid false matches
+            # (e.g., "LoadEventIds" contains "event" but isn't an event)
+            if title.endswith(' Constructor') or ' Constructor ' in title:
                 class_info['constructors'].append(entry)
-            elif 'propert' in title_lower:
+            elif title.endswith(' Property') or title.endswith(' Properties'):
                 class_info['properties'].append(entry)
-            elif 'method' in title_lower or 'function' in title_lower:
+            elif title.endswith(' Method') or title.endswith(' Methods'):
                 class_info['methods'].append(entry)
-            elif 'event' in title_lower:
+            elif title.endswith(' Event') or title.endswith(' Events'):
                 class_info['events'].append(entry)
-            elif 'field' in title_lower:
+            elif title.endswith(' Field') or title.endswith(' Fields'):
                 class_info['fields'].append(entry)
-            elif 'operator' in title_lower:
+            elif title.endswith(' Operator') or title.endswith(' Operators'):
                 class_info['operators'].append(entry)
             else:
                 class_info['other'].append(entry)
@@ -641,19 +641,22 @@ class CHMSearch:
         conn = sqlite3.connect(str(self.db_path))
         cursor = conn.cursor()
 
-        # Try exact match first
+        # Try exact match first (with common suffixes)
         cursor.execute('''
             SELECT path, title, namespace, help_id
             FROM documents
             WHERE title = ? OR title = ? || ' Class' OR title = ? || ' Delegate'
                   OR title = ? || ' Interface' OR title = ? || ' Enumeration'
+                  OR title = ? || ' Field' OR title = ? || ' Property'
+                  OR title = ? || ' Event' OR title = ? || ' Method'
             ORDER BY length(title)
             LIMIT 1
-        ''', (type_name, type_name, type_name, type_name, type_name))
+        ''', (type_name, type_name, type_name, type_name, type_name,
+              type_name, type_name, type_name, type_name))
 
         row = cursor.fetchone()
         if not row:
-            # Try partial match
+            # Try partial match with all member types
             cursor.execute('''
                 SELECT path, title, namespace, help_id
                 FROM documents
@@ -661,7 +664,8 @@ class CHMSearch:
                 AND (title LIKE '% Class' OR title LIKE '% Delegate'
                      OR title LIKE '% Interface' OR title LIKE '% Enumeration'
                      OR title LIKE '% Event' OR title LIKE '% Property'
-                     OR title LIKE '% Method')
+                     OR title LIKE '% Method' OR title LIKE '% Field'
+                     OR title LIKE '% Constructor')
                 ORDER BY length(title)
                 LIMIT 1
             ''', (f'%{type_name}%', f'%{type_name}%'))
@@ -890,6 +894,16 @@ class CHMSearch:
                 ''', (f'%.{member_name} Method',))
                 row = cursor.fetchone()
 
+            if not row:
+                cursor.execute('''
+                    SELECT path, title, help_id
+                    FROM documents
+                    WHERE title LIKE ?
+                    ORDER BY length(title)
+                    LIMIT 1
+                ''', (f'%.{member_name} Field',))
+                row = cursor.fetchone()
+
             conn.close()
 
             if row:
@@ -904,7 +918,7 @@ class CHMSearch:
                         'description': member_info['description']
                     })
 
-                    # If it's an event, follow the handler type
+                    # Follow return/value type for events, properties, methods
                     if member_info['return_type'] and member_info['return_type']['path']:
                         handler_info = self.inspect(member_info['return_type']['path'])
                         if handler_info:
@@ -917,27 +931,33 @@ class CHMSearch:
                                 'description': handler_info['description']
                             })
 
-                            # Follow the delegate parameters
-                            for param in handler_info['parameters']:
-                                if param['type_path']:
-                                    param_info = self.inspect(param['type_path'])
-                                    if param_info:
-                                        param_entry = {
-                                            'level': 3,
-                                            'type': param_info['category'],
-                                            'title': param_info['title'],
-                                            'path': param_info['path'],
-                                            'param_name': param['name'],
-                                            'description': param_info['description']
-                                        }
+                            # If it's a delegate, follow the parameters
+                            if handler_info['category'] == 'delegate':
+                                for param in handler_info['parameters']:
+                                    if param['type_path']:
+                                        param_info = self.inspect(param['type_path'])
+                                        if param_info:
+                                            param_entry = {
+                                                'level': 3,
+                                                'type': param_info['category'],
+                                                'title': param_info['title'],
+                                                'path': param_info['path'],
+                                                'param_name': param['name'],
+                                                'description': param_info['description']
+                                            }
 
-                                        # If it's an EventArgs class, include its properties
-                                        if 'EventArgs' in param_info['title']:
-                                            props = param_info.get('properties', [])
-                                            if props:
-                                                param_entry['properties'] = props
+                                            # If it's an EventArgs class, include its properties
+                                            if 'EventArgs' in param_info['title']:
+                                                props = param_info.get('properties', [])
+                                                if props:
+                                                    param_entry['properties'] = props
 
-                                        result['chain'].append(param_entry)
+                                            result['chain'].append(param_entry)
+
+                            # If it's a class (return type of property/method), show its key info
+                            elif handler_info['category'] in ('class', 'eventargs'):
+                                if handler_info.get('properties'):
+                                    result['chain'][-1]['properties'] = handler_info['properties'][:10]
 
         return result
 
