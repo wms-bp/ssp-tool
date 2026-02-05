@@ -1195,6 +1195,7 @@ Examples:
     examples_parser = subparsers.add_parser('examples', aliases=['ex'], help='List documents with code examples')
     examples_parser.add_argument('namespace', nargs='?', help='Optional namespace to filter by')
     examples_parser.add_argument('--limit', '-l', type=int, default=50, help='Max results (default: 50)')
+    examples_parser.add_argument('--verbose', '-v', action='store_true', help='Show file paths')
     examples_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
 
     # Example command - get a specific code example
@@ -1469,6 +1470,7 @@ Examples:
         elif args.command in ('examples', 'ex'):
             ns = args.namespace if hasattr(args, 'namespace') else None
             results = chm.list_examples(namespace=ns, limit=args.limit)
+            verbose = hasattr(args, 'verbose') and args.verbose
             if hasattr(args, 'json') and args.json:
                 print(json.dumps(results, indent=2))
             else:
@@ -1482,6 +1484,7 @@ Examples:
                         print(f"\nFound {len(results)} documents with examples in '{ns}':\n")
                     else:
                         print(f"\nFound {len(results)} documents with examples:\n")
+                    print("Use: ./chm example \"<Title>\" to view example code\n")
 
                     current_ns = None
                     for r in results:
@@ -1489,7 +1492,8 @@ Examples:
                             current_ns = r['namespace']
                             print(f"\n  [{current_ns}]")
                         print(f"    {r['title']}")
-                        print(f"      Path: {r['path']}")
+                        if verbose:
+                            print(f"      Path: {r['path']}")
 
         elif args.command in ('example', 'eg'):
             result = chm.get_example(args.type_name)
