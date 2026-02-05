@@ -185,6 +185,34 @@ def extract_properties_table(html_content: str) -> list:
     return props
 
 
+def extract_example(html_content: str) -> Optional[str]:
+    """Extract code example from HTML content."""
+    # Look for Example section followed by code block
+    # Pattern: >Example</span>...followed by...<pre xml:space="preserve">CODE</pre>
+    match = re.search(
+        r'>Example</span>.*?<pre[^>]*xml:space="preserve"[^>]*>(.*?)</pre>',
+        html_content,
+        re.DOTALL | re.IGNORECASE
+    )
+    if match:
+        code = match.group(1)
+        # Remove HTML formatting tags but preserve structure
+        code = re.sub(r'<span[^>]*class="highlight-comment"[^>]*>([^<]*)</span>', r'// \1', code)
+        code = re.sub(r'<span[^>]*class="highlight-keyword"[^>]*>([^<]*)</span>', r'\1', code)
+        code = re.sub(r'<span[^>]*class="highlight-literal"[^>]*>([^<]*)</span>', r'\1', code)
+        code = re.sub(r'<span[^>]*class="highlight-number"[^>]*>([^<]*)</span>', r'\1', code)
+        code = re.sub(r'<span[^>]*>([^<]*)</span>', r'\1', code)
+        code = re.sub(r'<[^>]+>', '', code)
+        code = html.unescape(code)
+        return code.strip()
+    return None
+
+
+def has_example(html_content: str) -> bool:
+    """Check if HTML content has an example section."""
+    return '>Example</span>' in html_content
+
+
 def get_type_category(help_id: str) -> str:
     """Determine the type category from help_id."""
     if not help_id:
@@ -716,6 +744,8 @@ class CHMSearch:
             'parameters': extract_parameters(content),
             'return_type': extract_return_type(content),
             'properties': extract_properties_table(content),
+            'example': extract_example(content),
+            'has_example': has_example(content),
             'references': [],
             'all_links': extract_links(content)
         }
@@ -816,6 +846,128 @@ class CHMSearch:
             return node
 
         return traverse_node(start, depth)
+
+    def list_examples(self, namespace: Optional[str] = None, limit: int = 100) -> list:
+        """
+        List all documents that have code examples.
+
+        Args:
+            namespace: Optional namespace to filter by
+            limit: Maximum number of results
+
+        Returns:
+            List of documents with examples
+        """
+        self.ensure_extracted()
+
+        if not self.db_path.exists():
+            self.build_index()
+
+        # We need to check actual HTML files for examples since we don't index that
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        if namespace:
+            cursor.execute('''
+                SELECT path, title, namespace
+                FROM documents
+                WHERE namespace LIKE ?
+                ORDER BY namespace, title
+            ''', (f'%{namespace}%',))
+        else:
+            cursor.execute('''
+                SELECT path, title, namespace
+                FROM documents
+                WHERE namespace != ''
+                ORDER BY namespace, title
+            ''')
+
+        results = []
+        for row in cursor.fetchall():
+            if len(results) >= limit:
+                break
+            path, title, ns = row
+            content = self.get_file_content(path)
+            if content and has_example(content):
+                results.append({
+                    'path': path,
+                    'title': title,
+                    'namespace': ns
+                })
+
+        conn.close()
+        return results
+
+    def get_example(self, path_or_name: str) -> Optional[dict]:
+        """
+        Get the code example from a document.
+
+        Args:
+            path_or_name: Document path or type name
+
+        Returns:
+            Dict with title, path, and example code
+        """
+        self.ensure_extracted()
+
+        # Resolve path
+        if path_or_name.endswith('.htm'):
+            path = path_or_name if path_or_name.startswith('html/') else f'html/{path_or_name}'
+            doc_info = self.get_doc_by_path(path)
+        else:
+            doc_info = self.find_type(path_or_name)
+            path = doc_info['path'] if doc_info else None
+
+        if not doc_info:
+            return None
+
+        content = self.get_file_content(path)
+        if not content:
+            return None
+
+        example_code = extract_example(content)
+        if not example_code:
+            return None
+
+        return {
+            'title': doc_info['title'],
+            'path': path,
+            'namespace': doc_info.get('namespace', ''),
+            'example': example_code
+        }
+
+    def examples_by_namespace(self) -> dict:
+        """
+        Get a summary of examples grouped by namespace.
+
+        Returns:
+            Dict mapping namespace to count of examples
+        """
+        self.ensure_extracted()
+
+        if not self.db_path.exists():
+            self.build_index()
+
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT DISTINCT namespace
+            FROM documents
+            WHERE namespace != ''
+            ORDER BY namespace
+        ''')
+
+        namespaces = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        results = {}
+        for ns in namespaces:
+            examples = self.list_examples(namespace=ns, limit=1000)
+            if examples:
+                results[ns] = len(examples)
+
+        return results
 
     def api_chain(self, start: str, member_name: Optional[str] = None) -> dict:
         """
@@ -1039,6 +1191,22 @@ Examples:
     api_parser.add_argument('member', nargs='?', help='Optional member name to focus on')
     api_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
 
+    # Examples command - list documents with code examples
+    examples_parser = subparsers.add_parser('examples', aliases=['ex'], help='List documents with code examples')
+    examples_parser.add_argument('namespace', nargs='?', help='Optional namespace to filter by')
+    examples_parser.add_argument('--limit', '-l', type=int, default=50, help='Max results (default: 50)')
+    examples_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
+    # Example command - get a specific code example
+    example_parser = subparsers.add_parser('example', aliases=['eg'], help='Get code example from a document')
+    example_parser.add_argument('type_name', help='Type name or document path')
+    example_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
+    # Examples summary command - show examples count by namespace
+    examples_summary_parser = subparsers.add_parser('examples-summary', aliases=['exs'],
+                                                     help='Show count of examples by namespace')
+    examples_summary_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -1213,6 +1381,10 @@ Examples:
                             print(f"  [{r['category']}] {r['title']}")
                             print(f"    -> {r['path']}")
 
+                if info.get('has_example'):
+                    print(f"\n*** This document has a CODE EXAMPLE ***")
+                    print(f"    Use: ./chm example \"{info['title']}\"")
+
         elif args.command in ('traverse', 'tr'):
             tree = chm.traverse(args.start, args.depth)
             if hasattr(args, 'json') and args.json:
@@ -1293,6 +1465,60 @@ Examples:
                             print(f"{indent}      - {p['name']}: {p.get('description', '')[:50]}")
 
                     print()
+
+        elif args.command in ('examples', 'ex'):
+            ns = args.namespace if hasattr(args, 'namespace') else None
+            results = chm.list_examples(namespace=ns, limit=args.limit)
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(results, indent=2))
+            else:
+                if not results:
+                    if ns:
+                        print(f"No examples found in namespace '{ns}'")
+                    else:
+                        print("No examples found")
+                else:
+                    if ns:
+                        print(f"\nFound {len(results)} documents with examples in '{ns}':\n")
+                    else:
+                        print(f"\nFound {len(results)} documents with examples:\n")
+
+                    current_ns = None
+                    for r in results:
+                        if r['namespace'] != current_ns:
+                            current_ns = r['namespace']
+                            print(f"\n  [{current_ns}]")
+                        print(f"    {r['title']}")
+                        print(f"      Path: {r['path']}")
+
+        elif args.command in ('example', 'eg'):
+            result = chm.get_example(args.type_name)
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                if not result:
+                    print(f"No example found for: {args.type_name}")
+                    sys.exit(1)
+
+                print(f"\n{'=' * 70}")
+                print(f"Example: {result['title']}")
+                print(f"Namespace: {result['namespace']}")
+                print(f"Path: {result['path']}")
+                print(f"{'=' * 70}\n")
+                print(result['example'])
+                print()
+
+        elif args.command in ('examples-summary', 'exs'):
+            results = chm.examples_by_namespace()
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(results, indent=2))
+            else:
+                print(f"\nNamespaces with code examples:\n")
+                total = 0
+                for ns, count in sorted(results.items()):
+                    print(f"  {ns}: {count} examples")
+                    total += count
+                print(f"\nTotal: {total} examples across {len(results)} namespaces")
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
