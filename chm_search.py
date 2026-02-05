@@ -86,7 +86,126 @@ def extract_meta_info(html_content: str) -> dict:
     if match:
         info['keywords'] = match.group(1)
 
+    # Extract description
+    match = re.search(r'name="Description"\s+content="([^"]+)"', html_content)
+    if match:
+        info['description'] = html.unescape(match.group(1))
+
     return info
+
+
+def extract_links(html_content: str) -> list:
+    """Extract internal documentation links from HTML content."""
+    links = []
+    # Match internal links like <a href="guid.htm">TypeName</a>
+    # Exclude external links (https://, http://)
+    pattern = r'<a\s+href="([a-f0-9\-]+\.htm)"[^>]*>([^<]+)</a>'
+
+    for match in re.finditer(pattern, html_content, re.IGNORECASE):
+        href = match.group(1)
+        text = html.unescape(match.group(2).strip())
+        # Clean up text (remove <wbr /> tags that might have been captured)
+        text = re.sub(r'<[^>]+>', '', text)
+        links.append({
+            'path': f'html/{href}',
+            'text': text
+        })
+
+    return links
+
+
+def extract_code_signature(html_content: str) -> Optional[str]:
+    """Extract the code signature from an HTML document."""
+    # Look for the code block
+    match = re.search(r'<pre[^>]*xml:space="preserve"[^>]*>(.*?)</pre>', html_content, re.DOTALL)
+    if match:
+        code = match.group(1)
+        # Remove HTML tags but keep structure
+        code = re.sub(r'<span[^>]*class="keyword"[^>]*>([^<]+)</span>', r'\1', code)
+        code = re.sub(r'<span[^>]*class="identifier"[^>]*>([^<]+)</span>', r'\1', code)
+        code = re.sub(r'<span[^>]*class="parameter"[^>]*>([^<]+)</span>', r'\1', code)
+        code = re.sub(r'<[^>]+>', '', code)
+        code = html.unescape(code).strip()
+        return code
+    return None
+
+
+def extract_parameters(html_content: str) -> list:
+    """Extract parameter information from delegate/method documentation."""
+    params = []
+    # Look for parameter definitions: <dt>paramName <a href="...">Type</a></dt><dd>description</dd>
+    pattern = r'<dt[^>]*>.*?<span class="parameter">([^<]+)</span>\s*<a href="([^"]+)">([^<]+)</a>.*?</dt>\s*<dd>([^<]*)</dd>'
+
+    for match in re.finditer(pattern, html_content, re.DOTALL | re.IGNORECASE):
+        params.append({
+            'name': match.group(1).strip(),
+            'type_path': f'html/{match.group(2)}' if not match.group(2).startswith('http') else None,
+            'type_name': html.unescape(match.group(3).strip()),
+            'description': html.unescape(match.group(4).strip())
+        })
+
+    return params
+
+
+def extract_return_type(html_content: str) -> Optional[dict]:
+    """Extract return type information."""
+    # Look for Value section (for events/properties) or Return Value section
+    match = re.search(r'<h4>Value</h4>\s*<a href="([^"]+)">([^<]+)</a>', html_content)
+    if match:
+        href = match.group(1)
+        return {
+            'path': f'html/{href}' if not href.startswith('http') else None,
+            'name': html.unescape(match.group(2).strip())
+        }
+
+    match = re.search(r'<h4>Return Value</h4>.*?<a href="([^"]+)">([^<]+)</a>', html_content, re.DOTALL)
+    if match:
+        href = match.group(1)
+        return {
+            'path': f'html/{href}' if not href.startswith('http') else None,
+            'name': html.unescape(match.group(2).strip())
+        }
+
+    return None
+
+
+def extract_properties_table(html_content: str) -> list:
+    """Extract properties from a class documentation page."""
+    props = []
+    # Look for property table rows
+    pattern = r'<tr><td>.*?</td><td><a href="([^"]+)">([^<]+)</a></td><td>\s*([^<]*)\s*</td></tr>'
+
+    for match in re.finditer(pattern, html_content, re.DOTALL):
+        props.append({
+            'path': f'html/{match.group(1)}',
+            'name': html.unescape(match.group(2).strip()),
+            'description': html.unescape(match.group(3).strip())
+        })
+
+    return props
+
+
+def get_type_category(help_id: str) -> str:
+    """Determine the type category from help_id."""
+    if not help_id:
+        return 'unknown'
+    if help_id.startswith('T:'):
+        if 'Delegate' in help_id or 'Handler' in help_id or 'Callback' in help_id:
+            return 'delegate'
+        if 'EventArgs' in help_id:
+            return 'eventargs'
+        if 'Enum' in help_id:
+            return 'enum'
+        return 'class'
+    elif help_id.startswith('E:'):
+        return 'event'
+    elif help_id.startswith('P:'):
+        return 'property'
+    elif help_id.startswith('M:'):
+        return 'method'
+    elif help_id.startswith('F:'):
+        return 'field'
+    return 'unknown'
 
 
 class CHMSearch:
@@ -484,6 +603,344 @@ class CHMSearch:
         conn.close()
         return class_info
 
+    def get_doc_by_path(self, path: str) -> Optional[dict]:
+        """Get document info by path."""
+        self.ensure_extracted()
+
+        if not self.db_path.exists():
+            self.build_index()
+
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT path, title, namespace, help_id
+            FROM documents
+            WHERE path = ?
+        ''', (path,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return {
+                'path': row[0],
+                'title': row[1],
+                'namespace': row[2],
+                'help_id': row[3]
+            }
+        return None
+
+    def find_type(self, type_name: str) -> Optional[dict]:
+        """Find a type by name and return its document info."""
+        self.ensure_extracted()
+
+        if not self.db_path.exists():
+            self.build_index()
+
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        # Try exact match first
+        cursor.execute('''
+            SELECT path, title, namespace, help_id
+            FROM documents
+            WHERE title = ? OR title = ? || ' Class' OR title = ? || ' Delegate'
+                  OR title = ? || ' Interface' OR title = ? || ' Enumeration'
+            ORDER BY length(title)
+            LIMIT 1
+        ''', (type_name, type_name, type_name, type_name, type_name))
+
+        row = cursor.fetchone()
+        if not row:
+            # Try partial match
+            cursor.execute('''
+                SELECT path, title, namespace, help_id
+                FROM documents
+                WHERE (title LIKE ? OR help_id LIKE ?)
+                AND (title LIKE '% Class' OR title LIKE '% Delegate'
+                     OR title LIKE '% Interface' OR title LIKE '% Enumeration'
+                     OR title LIKE '% Event' OR title LIKE '% Property'
+                     OR title LIKE '% Method')
+                ORDER BY length(title)
+                LIMIT 1
+            ''', (f'%{type_name}%', f'%{type_name}%'))
+            row = cursor.fetchone()
+
+        conn.close()
+
+        if row:
+            return {
+                'path': row[0],
+                'title': row[1],
+                'namespace': row[2],
+                'help_id': row[3]
+            }
+        return None
+
+    def inspect(self, path_or_name: str) -> Optional[dict]:
+        """
+        Inspect a type/member and return detailed information including all references.
+        This is the core method for understanding API relationships.
+        """
+        self.ensure_extracted()
+
+        # First, resolve the path
+        if path_or_name.endswith('.htm'):
+            path = path_or_name if path_or_name.startswith('html/') else f'html/{path_or_name}'
+            doc_info = self.get_doc_by_path(path)
+        else:
+            doc_info = self.find_type(path_or_name)
+            path = doc_info['path'] if doc_info else None
+
+        if not doc_info:
+            return None
+
+        content = self.get_file_content(path)
+        if not content:
+            return None
+
+        # Build comprehensive inspection result
+        result = {
+            'title': doc_info['title'],
+            'path': path,
+            'namespace': doc_info.get('namespace', ''),
+            'help_id': doc_info.get('help_id', ''),
+            'category': get_type_category(doc_info.get('help_id', '')),
+            'description': extract_meta_info(content).get('description', ''),
+            'signature': extract_code_signature(content),
+            'parameters': extract_parameters(content),
+            'return_type': extract_return_type(content),
+            'properties': extract_properties_table(content),
+            'references': [],
+            'all_links': extract_links(content)
+        }
+
+        # Identify key referenced types
+        seen_paths = set()
+        for link in result['all_links']:
+            if link['path'] not in seen_paths:
+                seen_paths.add(link['path'])
+                link_doc = self.get_doc_by_path(link['path'])
+                if link_doc:
+                    result['references'].append({
+                        'path': link['path'],
+                        'title': link_doc['title'],
+                        'text': link['text'],
+                        'category': get_type_category(link_doc.get('help_id', ''))
+                    })
+
+        return result
+
+    def traverse(self, start: str, depth: int = 2, follow_types: Optional[list] = None) -> dict:
+        """
+        Traverse the API documentation tree starting from a type.
+
+        Args:
+            start: Starting type name or path
+            depth: How many levels to traverse (default 2)
+            follow_types: List of categories to follow (e.g., ['delegate', 'eventargs', 'class'])
+                         If None, follows all types
+
+        Returns:
+            A tree structure with the traversed types
+        """
+        if follow_types is None:
+            follow_types = ['delegate', 'eventargs', 'class', 'interface', 'event', 'property']
+
+        visited = set()
+
+        def traverse_node(path_or_name: str, current_depth: int) -> Optional[dict]:
+            if current_depth <= 0:
+                return None
+
+            info = self.inspect(path_or_name)
+            if not info:
+                return None
+
+            if info['path'] in visited:
+                return {'_circular_ref': info['path'], 'title': info['title']}
+
+            visited.add(info['path'])
+
+            node = {
+                'title': info['title'],
+                'path': info['path'],
+                'category': info['category'],
+                'namespace': info['namespace'],
+                'description': info['description'],
+                'signature': info['signature'],
+            }
+
+            # Add parameters if present
+            if info['parameters']:
+                node['parameters'] = []
+                for param in info['parameters']:
+                    param_node = {
+                        'name': param['name'],
+                        'type': param['type_name'],
+                        'description': param['description']
+                    }
+                    # Traverse parameter types
+                    if param['type_path'] and current_depth > 1:
+                        param_type_info = self.inspect(param['type_path'])
+                        if param_type_info and param_type_info['category'] in follow_types:
+                            param_node['type_details'] = traverse_node(param['type_path'], current_depth - 1)
+                    node['parameters'].append(param_node)
+
+            # Add return/value type if present
+            if info['return_type'] and info['return_type']['path']:
+                ret_info = self.inspect(info['return_type']['path'])
+                if ret_info and ret_info['category'] in follow_types:
+                    node['return_type'] = {
+                        'name': info['return_type']['name'],
+                        'details': traverse_node(info['return_type']['path'], current_depth - 1)
+                    }
+                else:
+                    node['return_type'] = {'name': info['return_type']['name']}
+
+            # Add properties if this is a class/eventargs with properties
+            if info['properties'] and info['category'] in ('class', 'eventargs'):
+                node['properties'] = []
+                for prop in info['properties'][:10]:  # Limit to first 10
+                    node['properties'].append({
+                        'name': prop['name'],
+                        'description': prop['description'],
+                        'path': prop['path']
+                    })
+
+            return node
+
+        return traverse_node(start, depth)
+
+    def api_chain(self, start: str, member_name: Optional[str] = None) -> dict:
+        """
+        Follow an API chain starting from a class, optionally focusing on a specific member.
+        This is useful for understanding event handler flows.
+
+        Example: api_chain("ClwDimswex", "LoadStateChange")
+        Will show: ClwDimswex.LoadStateChange -> LoadEventHandler -> (LightingBase, LoadEventArgs) -> LoadEventArgs properties
+        """
+        result = {
+            'start_class': start,
+            'member': member_name,
+            'chain': []
+        }
+
+        # Get the starting class
+        class_info = self.inspect(start)
+        if not class_info:
+            return {'error': f'Class not found: {start}'}
+
+        result['chain'].append({
+            'level': 0,
+            'type': 'class',
+            'title': class_info['title'],
+            'path': class_info['path'],
+            'namespace': class_info['namespace']
+        })
+
+        # If a member is specified, find it
+        if member_name:
+            # Search for the member - try direct match first, then inherited
+            self.ensure_extracted()
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+
+            base_name = class_info['title'].replace(' Class', '').replace(' Interface', '').strip()
+
+            # Try direct class member first
+            cursor.execute('''
+                SELECT path, title, help_id
+                FROM documents
+                WHERE title LIKE ?
+                LIMIT 1
+            ''', (f'{base_name}.{member_name}%',))
+
+            row = cursor.fetchone()
+
+            # If not found, try searching for any class with this member
+            if not row:
+                cursor.execute('''
+                    SELECT path, title, help_id
+                    FROM documents
+                    WHERE title LIKE ?
+                    ORDER BY length(title)
+                    LIMIT 1
+                ''', (f'%.{member_name} Event',))
+                row = cursor.fetchone()
+
+            if not row:
+                cursor.execute('''
+                    SELECT path, title, help_id
+                    FROM documents
+                    WHERE title LIKE ?
+                    ORDER BY length(title)
+                    LIMIT 1
+                ''', (f'%.{member_name} Property',))
+                row = cursor.fetchone()
+
+            if not row:
+                cursor.execute('''
+                    SELECT path, title, help_id
+                    FROM documents
+                    WHERE title LIKE ?
+                    ORDER BY length(title)
+                    LIMIT 1
+                ''', (f'%.{member_name} Method',))
+                row = cursor.fetchone()
+
+            conn.close()
+
+            if row:
+                member_info = self.inspect(row[0])
+                if member_info:
+                    result['chain'].append({
+                        'level': 1,
+                        'type': member_info['category'],
+                        'title': member_info['title'],
+                        'path': member_info['path'],
+                        'signature': member_info['signature'],
+                        'description': member_info['description']
+                    })
+
+                    # If it's an event, follow the handler type
+                    if member_info['return_type'] and member_info['return_type']['path']:
+                        handler_info = self.inspect(member_info['return_type']['path'])
+                        if handler_info:
+                            result['chain'].append({
+                                'level': 2,
+                                'type': handler_info['category'],
+                                'title': handler_info['title'],
+                                'path': handler_info['path'],
+                                'signature': handler_info['signature'],
+                                'description': handler_info['description']
+                            })
+
+                            # Follow the delegate parameters
+                            for param in handler_info['parameters']:
+                                if param['type_path']:
+                                    param_info = self.inspect(param['type_path'])
+                                    if param_info:
+                                        param_entry = {
+                                            'level': 3,
+                                            'type': param_info['category'],
+                                            'title': param_info['title'],
+                                            'path': param_info['path'],
+                                            'param_name': param['name'],
+                                            'description': param_info['description']
+                                        }
+
+                                        # If it's an EventArgs class, include its properties
+                                        if 'EventArgs' in param_info['title']:
+                                            props = param_info.get('properties', [])
+                                            if props:
+                                                param_entry['properties'] = props
+
+                                        result['chain'].append(param_entry)
+
+        return result
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -544,6 +1001,23 @@ Examples:
     class_parser = subparsers.add_parser('class', aliases=['c'], help='Show class documentation with all members')
     class_parser.add_argument('class_name', help='Class name to look up')
     class_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
+    # Inspect command - detailed view of a single type with all references
+    inspect_parser = subparsers.add_parser('inspect', aliases=['i'], help='Inspect a type/member with all references')
+    inspect_parser.add_argument('type_name', help='Type name or document path to inspect')
+    inspect_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
+    # Traverse command - follow the type tree
+    traverse_parser = subparsers.add_parser('traverse', aliases=['tr'], help='Traverse the API tree from a starting type')
+    traverse_parser.add_argument('start', help='Starting type name or path')
+    traverse_parser.add_argument('--depth', '-d', type=int, default=2, help='Traversal depth (default: 2)')
+    traverse_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
+    # API chain command - follow an event/property chain
+    api_parser = subparsers.add_parser('api', aliases=['a'], help='Follow an API chain (e.g., event handler flow)')
+    api_parser.add_argument('class_name', help='Starting class name')
+    api_parser.add_argument('member', nargs='?', help='Optional member name to focus on')
+    api_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
 
     args = parser.parse_args()
 
@@ -666,6 +1140,139 @@ Examples:
                                 member_name = member_name[1:]
                             print(f"  {item['title']}")
                             print(f"    Path: {item['path']}")
+
+        elif args.command in ('inspect', 'i'):
+            info = chm.inspect(args.type_name)
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(info, indent=2))
+            else:
+                if not info:
+                    print(f"Type not found: {args.type_name}")
+                    sys.exit(1)
+
+                print(f"\n{'=' * 70}")
+                print(f"Title: {info['title']}")
+                print(f"Category: {info['category']}")
+                print(f"Namespace: {info['namespace']}")
+                print(f"Path: {info['path']}")
+                if info.get('description'):
+                    print(f"Description: {info['description']}")
+                print(f"{'=' * 70}")
+
+                if info.get('signature'):
+                    print(f"\nSignature:")
+                    print(f"  {info['signature']}")
+
+                if info.get('parameters'):
+                    print(f"\nParameters:")
+                    for p in info['parameters']:
+                        print(f"  {p['name']}: {p['type_name']}")
+                        if p['type_path']:
+                            print(f"    -> {p['type_path']}")
+                        if p.get('description'):
+                            print(f"    {p['description']}")
+
+                if info.get('return_type'):
+                    print(f"\nReturn/Value Type:")
+                    print(f"  {info['return_type']['name']}")
+                    if info['return_type'].get('path'):
+                        print(f"  -> {info['return_type']['path']}")
+
+                if info.get('properties'):
+                    print(f"\nProperties:")
+                    for p in info['properties'][:15]:
+                        print(f"  {p['name']}: {p.get('description', '')[:60]}")
+                        print(f"    -> {p['path']}")
+
+                if info.get('references'):
+                    print(f"\nReferenced Types ({len(info['references'])}):")
+                    seen = set()
+                    for r in info['references']:
+                        if r['title'] not in seen:
+                            seen.add(r['title'])
+                            print(f"  [{r['category']}] {r['title']}")
+                            print(f"    -> {r['path']}")
+
+        elif args.command in ('traverse', 'tr'):
+            tree = chm.traverse(args.start, args.depth)
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(tree, indent=2))
+            else:
+                if not tree:
+                    print(f"Type not found: {args.start}")
+                    sys.exit(1)
+
+                def print_tree(node, indent=0):
+                    prefix = "  " * indent
+                    if node.get('_circular_ref'):
+                        print(f"{prefix}[circular] -> {node['title']}")
+                        return
+
+                    cat = f"[{node.get('category', '?')}]"
+                    print(f"{prefix}{cat} {node['title']}")
+                    if node.get('signature'):
+                        sig = node['signature'][:80] + "..." if len(node.get('signature', '')) > 80 else node.get('signature', '')
+                        print(f"{prefix}  Sig: {sig}")
+
+                    if node.get('parameters'):
+                        print(f"{prefix}  Parameters:")
+                        for p in node['parameters']:
+                            print(f"{prefix}    - {p['name']}: {p['type']}")
+                            if p.get('type_details'):
+                                print_tree(p['type_details'], indent + 3)
+
+                    if node.get('return_type'):
+                        print(f"{prefix}  Returns: {node['return_type']['name']}")
+                        if node['return_type'].get('details'):
+                            print_tree(node['return_type']['details'], indent + 2)
+
+                    if node.get('properties'):
+                        print(f"{prefix}  Properties:")
+                        for p in node['properties'][:5]:
+                            print(f"{prefix}    - {p['name']}")
+
+                print_tree(tree)
+
+        elif args.command in ('api', 'a'):
+            chain = chm.api_chain(args.class_name, args.member if hasattr(args, 'member') else None)
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(chain, indent=2))
+            else:
+                if chain.get('error'):
+                    print(f"Error: {chain['error']}")
+                    sys.exit(1)
+
+                print(f"\n{'=' * 70}")
+                print(f"API Chain: {chain['start_class']}")
+                if chain.get('member'):
+                    print(f"Member: {chain['member']}")
+                print(f"{'=' * 70}\n")
+
+                for item in chain['chain']:
+                    indent = "  " * item['level']
+                    arrow = "└─>" if item['level'] > 0 else ""
+                    print(f"{indent}{arrow} [{item['type']}] {item['title']}")
+                    print(f"{indent}    Path: {item['path']}")
+
+                    if item.get('signature'):
+                        sig = item['signature']
+                        if len(sig) > 70:
+                            sig = sig[:70] + "..."
+                        print(f"{indent}    Signature: {sig}")
+
+                    if item.get('description'):
+                        desc = item['description'][:100]
+                        print(f"{indent}    Description: {desc}")
+
+                    if item.get('param_name'):
+                        print(f"{indent}    (Parameter: {item['param_name']})")
+
+                    if item.get('properties'):
+                        print(f"{indent}    Properties:")
+                        for p in item['properties'][:8]:
+                            print(f"{indent}      - {p['name']}: {p.get('description', '')[:50]}")
+
+                    print()
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
