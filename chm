@@ -1,0 +1,6 @@
+#!/bin/bash
+# Convenience wrapper for chm_search.py
+# Usage: chm <command> [args...]
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python3 "$SCRIPT_DIR/chm_search.py" "$@"
