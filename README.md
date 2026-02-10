@@ -43,6 +43,7 @@ A CLI tool for searching and navigating CHM (Compiled HTML Help) documentation f
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `class <name>` | `c` | Show class with all members (constructors, properties, methods, events) |
+| `enum <name>` | `e` | Show enumeration values |
 | `inspect <type>` | `i` | Detailed view of a type with all referenced types |
 | `traverse <type>` | `tr` | Follow the type tree recursively |
 | `api <class> [member]` | `a` | Follow API chains (event → handler → parameters) |
@@ -50,6 +51,10 @@ A CLI tool for searching and navigating CHM (Compiled HTML Help) documentation f
 ```bash
 # See all members of a class
 ./chm class HttpClient
+
+# Get enumeration values
+./chm enum SocketStatus
+./chm enum "HzKpBase.eLedAlternateColorTheme"
 
 # Inspect a type to see its signature, parameters, and references
 ./chm inspect "LoadEventHandler"
@@ -167,7 +172,32 @@ LoadEventIds.LevelChangeEventId Field
   Description: The level of the load changed.
 ```
 
-### 5. Exploring a Namespace
+### 5. Looking Up Enumeration Values
+
+```bash
+# Get all values for an enum
+./chm enum SocketStatus
+./chm enum "HzKpBase.eLedAlternateColorTheme"
+```
+
+Output:
+```
+Enum: SocketStatus Enumeration
+Namespace: Crestron.SimplSharp.CrestronSockets
+
+Values:
+  SOCKET_STATUS_NO_CONNECT        =  0  Not Connected
+  SOCKET_STATUS_WAITING           =  1  Waiting for Connection
+  SOCKET_STATUS_CONNECTED         =  2  Connected
+  SOCKET_STATUS_CONNECT_FAILED    =  3  Connection Failed
+  SOCKET_STATUS_BROKEN_REMOTELY   =  4  Connection Broken Remotely
+  SOCKET_STATUS_BROKEN_LOCALLY    =  5  Connection Broken Locally
+  ...
+```
+
+The `class` command also works for enums and will display the enum values.
+
+### 6. Exploring a Namespace
 
 ```bash
 # List available namespaces
@@ -177,7 +207,7 @@ LoadEventIds.LevelChangeEventId Field
 ./chm browse "Crestron.SimplSharp.Net.Http" --limit 100
 ```
 
-### 6. Deep Type Inspection
+### 7. Deep Type Inspection
 
 Use `traverse` to recursively explore type relationships:
 
@@ -185,14 +215,14 @@ Use `traverse` to recursively explore type relationships:
 ./chm traverse "LoadEventHandler" --depth 3
 ```
 
-### 7. Reading Full Documentation
+### 8. Reading Full Documentation
 
 ```bash
 # Get the path from search/inspect results, then read
 ./chm show html/e6dae853-e52a-aea1-01e7-aa7dd979a343.htm
 ```
 
-### 8. Finding Code Examples
+### 9. Finding Code Examples
 
 The SDK contains ~1000+ code examples. Use these commands to find implementation guidance:
 

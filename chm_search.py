@@ -213,10 +213,46 @@ def has_example(html_content: str) -> bool:
     return '>Example</span>' in html_content
 
 
-def get_type_category(help_id: str) -> str:
-    """Determine the type category from help_id."""
-    if not help_id:
+def extract_enum_members(html_content: str) -> list:
+    """Extract enumeration member values from the enumMemberList table."""
+    members = []
+    # Look for the enum members table
+    table_match = re.search(
+        r'<table[^>]*id="enumMemberList"[^>]*>(.*?)</table>',
+        html_content, re.DOTALL | re.IGNORECASE
+    )
+    if not table_match:
+        return members
+
+    table_html = table_match.group(1)
+
+    # Extract rows (skip header row)
+    rows = re.findall(r'<tr>(.*?)</tr>', table_html, re.DOTALL)
+    for row in rows:
+        cols = re.findall(r'<td>(.*?)</td>', row, re.DOTALL)
+        if len(cols) >= 2:
+            name = html_to_text(cols[0]).strip()
+            value = html_to_text(cols[1]).strip()
+            description = html_to_text(cols[2]).strip() if len(cols) >= 3 else ''
+            if name and name != 'Member name':  # Skip header if captured
+                members.append({
+                    'name': name,
+                    'value': value,
+                    'description': description
+                })
+
+    return members
+
+
+def get_type_category(help_id: str, title: str = '') -> str:
+    """Determine the type category from help_id and/or title."""
+    if not help_id and not title:
         return 'unknown'
+
+    # Check title for explicit type suffix
+    if title.endswith(' Enumeration'):
+        return 'enum'
+
     if help_id.startswith('T:'):
         if 'Delegate' in help_id or 'Handler' in help_id or 'Callback' in help_id:
             return 'delegate'
@@ -738,12 +774,13 @@ class CHMSearch:
             'path': path,
             'namespace': doc_info.get('namespace', ''),
             'help_id': doc_info.get('help_id', ''),
-            'category': get_type_category(doc_info.get('help_id', '')),
+            'category': get_type_category(doc_info.get('help_id', ''), doc_info.get('title', '')),
             'description': extract_meta_info(content).get('description', ''),
             'signature': extract_code_signature(content),
             'parameters': extract_parameters(content),
             'return_type': extract_return_type(content),
             'properties': extract_properties_table(content),
+            'enum_members': extract_enum_members(content),
             'example': extract_example(content),
             'has_example': has_example(content),
             'references': [],
@@ -761,7 +798,7 @@ class CHMSearch:
                         'path': link['path'],
                         'title': link_doc['title'],
                         'text': link['text'],
-                        'category': get_type_category(link_doc.get('help_id', ''))
+                        'category': get_type_category(link_doc.get('help_id', ''), link_doc.get('title', ''))
                     })
 
         return result
@@ -780,7 +817,7 @@ class CHMSearch:
             A tree structure with the traversed types
         """
         if follow_types is None:
-            follow_types = ['delegate', 'eventargs', 'class', 'interface', 'event', 'property']
+            follow_types = ['delegate', 'eventargs', 'class', 'interface', 'event', 'property', 'enum']
 
         visited = set()
 
@@ -832,6 +869,10 @@ class CHMSearch:
                     }
                 else:
                     node['return_type'] = {'name': info['return_type']['name']}
+
+            # Add enum members if this is an enum
+            if info.get('enum_members') and info['category'] == 'enum':
+                node['enum_members'] = info['enum_members']
 
             # Add properties if this is a class/eventargs with properties
             if info['properties'] and info['category'] in ('class', 'eventargs'):
@@ -1106,6 +1147,11 @@ class CHMSearch:
 
                                             result['chain'].append(param_entry)
 
+                            # If it's an enum, include enum members
+                            elif handler_info['category'] == 'enum':
+                                if handler_info.get('enum_members'):
+                                    result['chain'][-1]['enum_members'] = handler_info['enum_members']
+
                             # If it's a class (return type of property/method), show its key info
                             elif handler_info['category'] in ('class', 'eventargs'):
                                 if handler_info.get('properties'):
@@ -1173,6 +1219,11 @@ Examples:
     class_parser = subparsers.add_parser('class', aliases=['c'], help='Show class documentation with all members')
     class_parser.add_argument('class_name', help='Class name to look up')
     class_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
+    # Enum command - show enum values (shortcut for inspect on enums)
+    enum_parser = subparsers.add_parser('enum', aliases=['e'], help='Show enumeration values')
+    enum_parser.add_argument('type_name', help='Enum type name')
+    enum_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
 
     # Inspect command - detailed view of a single type with all references
     inspect_parser = subparsers.add_parser('inspect', aliases=['i'], help='Inspect a type/member with all references')
@@ -1293,6 +1344,29 @@ Examples:
                     print(f"    -> {entry['path']}")
 
         elif args.command in ('class', 'c'):
+            # Check if it's an enum first - if so, redirect to enum display
+            enum_check = chm.inspect(args.class_name)
+            if enum_check and enum_check.get('category') == 'enum' and enum_check.get('enum_members'):
+                if hasattr(args, 'json') and args.json:
+                    print(json.dumps(enum_check, indent=2))
+                else:
+                    print(f"\n{'=' * 70}")
+                    print(f"Enum: {enum_check['title']}")
+                    print(f"Namespace: {enum_check['namespace']}")
+                    if enum_check.get('description'):
+                        print(f"Description: {enum_check['description']}")
+                    print(f"{'=' * 70}")
+                    if enum_check.get('signature'):
+                        print(f"\nSignature: {enum_check['signature']}")
+                    print(f"\nValues:")
+                    max_name = max(len(m['name']) for m in enum_check['enum_members'])
+                    max_val = max(len(m['value']) for m in enum_check['enum_members'])
+                    for m in enum_check['enum_members']:
+                        desc = f"  {m['description']}" if m.get('description') else ''
+                        print(f"  {m['name']:<{max_name}}  = {m['value']:>{max_val}}{desc}")
+                    print()
+                sys.exit(0)
+
             info = chm.get_class_info(args.class_name)
             if hasattr(args, 'json') and args.json:
                 print(json.dumps(info, indent=2))
@@ -1330,6 +1404,37 @@ Examples:
                             print(f"  {item['title']}")
                             print(f"    Path: {item['path']}")
 
+        elif args.command in ('enum', 'e'):
+            info = chm.inspect(args.type_name)
+            if hasattr(args, 'json') and args.json:
+                print(json.dumps(info, indent=2))
+            else:
+                if not info:
+                    print(f"Enum not found: {args.type_name}")
+                    sys.exit(1)
+
+                print(f"\n{'=' * 70}")
+                print(f"Enum: {info['title']}")
+                print(f"Namespace: {info['namespace']}")
+                if info.get('description'):
+                    print(f"Description: {info['description']}")
+                print(f"{'=' * 70}")
+
+                if info.get('signature'):
+                    print(f"\nSignature: {info['signature']}")
+
+                if info.get('enum_members'):
+                    print(f"\nValues:")
+                    # Calculate column widths for alignment
+                    max_name = max(len(m['name']) for m in info['enum_members'])
+                    max_val = max(len(m['value']) for m in info['enum_members'])
+                    for m in info['enum_members']:
+                        desc = f"  {m['description']}" if m.get('description') else ''
+                        print(f"  {m['name']:<{max_name}}  = {m['value']:>{max_val}}{desc}")
+                else:
+                    print("\nNo enum members found.")
+                print()
+
         elif args.command in ('inspect', 'i'):
             info = chm.inspect(args.type_name)
             if hasattr(args, 'json') and args.json:
@@ -1366,6 +1471,12 @@ Examples:
                     print(f"  {info['return_type']['name']}")
                     if info['return_type'].get('path'):
                         print(f"  -> {info['return_type']['path']}")
+
+                if info.get('enum_members'):
+                    print(f"\nEnum Members:")
+                    for m in info['enum_members']:
+                        desc = f"  - {m.get('description', '')}" if m.get('description') else ''
+                        print(f"  {m['name']} = {m['value']}{desc}")
 
                 if info.get('properties'):
                     print(f"\nProperties:")
@@ -1419,6 +1530,11 @@ Examples:
                         if node['return_type'].get('details'):
                             print_tree(node['return_type']['details'], indent + 2)
 
+                    if node.get('enum_members'):
+                        print(f"{prefix}  Values:")
+                        for m in node['enum_members']:
+                            print(f"{prefix}    {m['name']} = {m['value']}")
+
                     if node.get('properties'):
                         print(f"{prefix}  Properties:")
                         for p in node['properties'][:5]:
@@ -1459,6 +1575,12 @@ Examples:
 
                     if item.get('param_name'):
                         print(f"{indent}    (Parameter: {item['param_name']})")
+
+                    if item.get('enum_members'):
+                        print(f"{indent}    Values:")
+                        for m in item['enum_members']:
+                            desc = f"  - {m.get('description', '')}" if m.get('description') else ''
+                            print(f"{indent}      {m['name']} = {m['value']}{desc}")
 
                     if item.get('properties'):
                         print(f"{indent}    Properties:")
