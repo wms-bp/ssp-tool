@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "chm-docs": {
+      "command": "/usr/local/bin/chm-docs"
+    }
+  }
+}

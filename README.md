@@ -1,13 +1,57 @@
 # CHM Documentation Search Tool
 
-A CLI tool for searching and navigating CHM (Compiled HTML Help) documentation files. Designed for large SDK documentation like Crestron SIMPL# Pro (~55,000 documents).
+A tool for searching and navigating CHM (Compiled HTML Help) documentation files. Designed for large SDK documentation like Crestron SIMPL# Pro (~55,000 documents).
 
-## Requirements
+Available as both a CLI tool and an MCP server for Claude Code.
+
+## MCP Server (Claude Code Integration)
+
+The MCP server lets Claude Code search the SDK documentation natively. It's packaged as a standalone macOS executable — no Python install needed.
+
+### Install
+
+1. Download or build the `.pkg` installer (see [Building](#building) below)
+2. Double-click `chm-docs-X.Y.Z.pkg` and follow the prompts (or CLI: `sudo installer -pkg chm-docs-*.pkg -target /`)
+3. Clone this repo — the `.mcp.json` is included and points to `/usr/local/bin/chm-docs`
+4. Start Claude Code in the project directory — the 9 `chm-docs` tools appear automatically
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `search` | Full-text keyword search across all docs |
+| `search_title` | Title-only search for precise type/member lookup |
+| `inspect` | Detailed view of any type — signature, params, enum values, references |
+| `get_class_info` | Class overview with members grouped by category |
+| `api_chain` | Trace event/property chains: class → delegate → eventargs → properties |
+| `browse_namespace` | List all types within a namespace |
+| `list_namespaces` | List all SDK namespaces with item counts |
+| `get_example` | Get C# code example for a type |
+| `show_document` | Read full document text by path |
+
+### Building
+
+Requires Python 3.13 and `chmlib` (`brew install chmlib`). The CHM file must be in the repo root.
+
+```bash
+bash build.sh
+```
+
+This creates a `.pkg` that installs:
+- `/usr/local/lib/chm-docs/` — application bundle
+- `/usr/local/share/chm-docs/SIMPLSharpPro.chm` — SDK documentation
+- `/usr/local/bin/chm-docs` — launcher
+
+To upgrade, install the new `.pkg` over the previous one.
+
+## CLI Tool
+
+### Requirements
 
 - Python 3.6+
 - `chmlib` (install via Homebrew: `brew install chmlib`)
 
-## Quick Start
+### Quick Start
 
 ```bash
 # First run will extract CHM and build search index (takes ~1 minute)

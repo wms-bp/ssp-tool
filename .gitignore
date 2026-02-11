@@ -2,6 +2,7 @@
 *.chm
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -16,6 +17,13 @@ __pycache__/
 .idea/
 *.swp
 *.swo
+
+# Build artifacts
+dist/
+build/
+pkg-payload/
+*.pkg
+*.spec
 
 # OS
 .DS_Store
