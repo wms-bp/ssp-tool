@@ -22,8 +22,11 @@ __pycache__/
 dist/
 build/
 pkg-payload/
+win-payload/
 *.pkg
 *.spec
+*-setup.exe
+*-win.zip
 
 # OS
 .DS_Store

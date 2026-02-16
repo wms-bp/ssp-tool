@@ -9,6 +9,7 @@ and other MCP-compatible clients.
 import contextlib
 import io
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -38,8 +39,11 @@ def _resolve_chm_path() -> str:
         if bundled.exists():
             return str(bundled)
 
-    # 3. Installed location
-    installed = Path("/usr/local/share/chm-docs/SIMPLSharpPro.chm")
+    # 3. Installed location (platform-specific)
+    if platform.system() == "Windows":
+        installed = Path(os.environ.get("LOCALAPPDATA", "")) / "chm-docs" / "SIMPLSharpPro.chm"
+    else:
+        installed = Path("/usr/local/share/chm-docs/SIMPLSharpPro.chm")
     if installed.exists():
         return str(installed)
 

@@ -4,16 +4,69 @@ A tool for searching and navigating CHM (Compiled HTML Help) documentation files
 
 Available as both a CLI tool and an MCP server for Claude Code.
 
-## MCP Server (Claude Code Integration)
+## Getting Started
 
-The MCP server lets Claude Code search the SDK documentation natively. It's packaged as a standalone macOS executable — no Python install needed.
+The CHM file is not included in this repo. You need to copy it from a Windows machine with Crestron's database installed.
 
-### Install
+### 1. Get the CHM file
 
-1. Download or build the `.pkg` installer (see [Building](#building) below)
-2. Double-click `chm-docs-X.Y.Z.pkg` and follow the prompts (or CLI: `sudo installer -pkg chm-docs-*.pkg -target /`)
-3. Clone this repo — the `.mcp.json` is included and points to `/usr/local/bin/chm-docs`
-4. Start Claude Code in the project directory — the 9 `chm-docs` tools appear automatically
+On your Windows machine, find the SDK documentation at:
+
+```
+C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm
+```
+
+Copy `SIMPLSharpPro.chm` into the root of this repo.
+
+### 2. Install prerequisites
+
+**macOS:**
+```bash
+brew install chmlib
+```
+
+**Windows:**
+Install [7-Zip](https://7-zip.org) (or `winget install 7zip.7zip`).
+
+### 3. Choose your setup
+
+#### MCP Server (Claude Code) — standalone binary, no Python needed at runtime
+
+**macOS:**
+```bash
+bash build.sh
+sudo installer -pkg chm-docs-*.pkg -target /
+# Or double-click the .pkg file
+```
+
+**Windows (PowerShell):**
+```powershell
+.\build.ps1
+# Run the installer, or extract the zip to %LOCALAPPDATA%\chm-docs
+```
+
+Then start Claude Code in this project directory — the `chm-docs` tools appear automatically.
+
+> **Note:** The included `.mcp.json` is configured for macOS (`/usr/local/bin/chm-docs`).
+> On Windows, create or update `.mcp.json` in the project root:
+> ```json
+> {
+>   "mcpServers": {
+>     "chm-docs": {
+>       "command": "%LOCALAPPDATA%\\chm-docs\\chm-docs.exe"
+>     }
+>   }
+> }
+> ```
+
+#### CLI Tool — use directly with Python
+
+```bash
+# First run extracts the CHM and builds the search index (~1 minute)
+./chm search "HttpClient"
+```
+
+## MCP Server Details
 
 ### MCP Tools
 
@@ -31,10 +84,16 @@ The MCP server lets Claude Code search the SDK documentation natively. It's pack
 
 ### Building
 
-Requires Python 3.13 and `chmlib` (`brew install chmlib`). The CHM file must be in the repo root.
+The CHM file must be in the repo root. Requires Python 3.13.
 
+**macOS:** Also needs `chmlib` (`brew install chmlib`).
 ```bash
 bash build.sh
+```
+
+**Windows:** Also needs [7-Zip](https://7-zip.org). Optionally [Inno Setup 6](https://jrsoftware.org/isinfo.php) for an `.exe` installer (otherwise produces a `.zip`).
+```powershell
+.\build.ps1
 ```
 
 This creates a `.pkg` that installs:

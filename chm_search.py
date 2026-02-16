@@ -9,7 +9,9 @@ Designed for large SDK documentation files like SIMPL# Pro.
 import argparse
 import html
 import os
+import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -300,13 +302,59 @@ class CHMSearch:
         if not self.extract_dir.exists():
             print(f"Extracting CHM file to cache... (this may take a moment)")
             self.extract_dir.mkdir(parents=True, exist_ok=True)
-            result = subprocess.run(
-                ['extract_chmLib', str(self.chm_path), str(self.extract_dir)],
-                capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"Failed to extract CHM: {result.stderr}")
+            try:
+                self._extract_chm()
+            except Exception:
+                # Clean up partial extraction on failure
+                shutil.rmtree(self.extract_dir, ignore_errors=True)
+                raise
             print("Extraction complete.")
+
+    def _extract_chm(self):
+        """Extract CHM using platform-appropriate tool."""
+        if platform.system() == "Windows":
+            self._extract_with_7z()
+        else:
+            self._extract_with_chmlib()
+
+    def _extract_with_chmlib(self):
+        """Extract using extract_chmLib (macOS/Linux)."""
+        if not shutil.which("extract_chmLib"):
+            raise RuntimeError(
+                "extract_chmLib not found. Install chmlib:\n"
+                "  macOS: brew install chmlib\n"
+                "  Linux: apt install libchm-bin"
+            )
+        result = subprocess.run(
+            ['extract_chmLib', str(self.chm_path), str(self.extract_dir)],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to extract CHM: {result.stderr}")
+
+    def _extract_with_7z(self):
+        """Extract using 7-Zip (Windows)."""
+        sz = shutil.which("7z") or shutil.which("7za")
+        if not sz:
+            # Check common install locations
+            for candidate in [
+                r"C:\Program Files\7-Zip\7z.exe",
+                r"C:\Program Files (x86)\7-Zip\7z.exe",
+            ]:
+                if Path(candidate).exists():
+                    sz = candidate
+                    break
+        if not sz:
+            raise RuntimeError(
+                "7-Zip not found. Install from https://7-zip.org\n"
+                "or: winget install 7zip.7zip"
+            )
+        result = subprocess.run(
+            [sz, 'x', str(self.chm_path), f'-o{self.extract_dir}', '-y'],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to extract CHM: {result.stderr}")
 
     def get_file_content(self, relative_path: str) -> Optional[str]:
         """Get content of a file from the extracted CHM."""
