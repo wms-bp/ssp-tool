@@ -6,33 +6,18 @@ The installed binary (`chm-docs`) runs in two modes:
 - **No arguments** — starts as an MCP server (stdio) for Claude Code
 - **With a command** — runs as a CLI tool (e.g. `chm-docs search "HttpClient"`)
 
-## Getting Started
+## Quick Start
 
-### 1. Build and install
+### 1. Install
 
-Both platforms produce a standalone binary — no Python needed at runtime.
+Download the latest release for your platform from [Releases](../../releases):
 
-**macOS:**
-```bash
-brew install chmlib        # extraction tool
-bash build.sh
-sudo installer -pkg chm-docs-*.pkg -target /
-# Or double-click the .pkg file
-```
-
-**Windows (PowerShell):**
-```powershell
-winget install 7zip.7zip              # extraction tool
-winget install JRSoftware.InnoSetup   # installer builder
-.\build.ps1
-# Run chm-docs-X.Y.Z-setup.exe
-```
-
-Build requires Python 3.13.
+- **macOS:** `chm-docs-X.Y.Z.pkg` — double-click or `sudo installer -pkg chm-docs-*.pkg -target /`
+- **Windows:** `chm-docs-X.Y.Z-setup.exe` — run the installer
 
 ### 2. Add the CHM file
 
-The CHM file is not included in the repo or installer. Copy `SIMPLSharpPro.chm` to the app's data directory:
+The CHM file is not included in the release. Copy `SIMPLSharpPro.chm` to the app's data directory:
 
 **Windows:** The tool checks these locations in order:
 1. `%LOCALAPPDATA%\chm-docs\SIMPLSharpPro.chm`
@@ -59,7 +44,7 @@ The included `.mcp.json` is configured for macOS. On Windows, update it:
 }
 ```
 
-Start Claude Code in this project directory — the 9 `chm-docs` tools appear automatically.
+Start Claude Code in this project directory — the `chm-docs` tools appear automatically.
 
 ### 4. Verify
 
@@ -70,18 +55,6 @@ chm-docs --version
 ### 5. First run
 
 The search index cache is built automatically on first run (~1 minute). After that, all queries are instant.
-
-## Install locations
-
-**macOS (.pkg):**
-- `/usr/local/lib/chm-docs/` — application bundle
-- `/usr/local/share/chm-docs/` — place `SIMPLSharpPro.chm` here
-- `/usr/local/bin/chm-docs` — launcher
-
-**Windows (installer):**
-- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM here)
-
-To upgrade, install the new package over the previous one.
 
 ## MCP Tools
 
@@ -266,6 +239,37 @@ chm-docs api <ClassName> <EventName>
 ### Inheritance
 
 Many classes inherit from base classes. When a member isn't found on a class directly, the tool searches parent classes/interfaces. Use `inspect` to see the full type hierarchy.
+
+## Building from Source
+
+Both platforms produce a standalone binary — no Python needed at runtime. Build requires Python 3.13.
+
+**macOS:**
+```bash
+brew install chmlib        # extraction tool (runtime dependency)
+bash build.sh
+sudo installer -pkg chm-docs-*.pkg -target /
+```
+
+**Windows (PowerShell):**
+```powershell
+winget install 7zip.7zip              # extraction tool (runtime dependency)
+winget install JRSoftware.InnoSetup   # installer builder
+.\build.ps1
+# Run chm-docs-X.Y.Z-setup.exe
+```
+
+### Install locations
+
+**macOS (.pkg):**
+- `/usr/local/lib/chm-docs/` — application bundle
+- `/usr/local/share/chm-docs/` — place `SIMPLSharpPro.chm` here
+- `/usr/local/bin/chm-docs` — launcher
+
+**Windows (installer):**
+- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM here)
+
+To upgrade, install the new package over the previous one.
 
 ## Cache
 
