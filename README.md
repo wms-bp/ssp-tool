@@ -8,33 +8,13 @@ The installed binary (`chm-docs`) runs in two modes:
 
 ## Getting Started
 
-### 1. Get the CHM file
-
-The CHM file is not included in this repo.
-
-**Windows:** No action needed if Crestron's database is installed. The tool automatically finds it at:
-```
-C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm
-```
-
-**macOS:** Copy `SIMPLSharpPro.chm` from a Windows machine into the root of this repo.
-
-### 2. Install prerequisites
-
-**macOS:**
-```bash
-brew install chmlib
-```
-
-**Windows:**
-Install [7-Zip](https://7-zip.org) (or `winget install 7zip.7zip`).
-
-### 3. Build and install
+### 1. Build and install
 
 Both platforms produce a standalone binary — no Python needed at runtime.
 
 **macOS:**
 ```bash
+brew install chmlib        # extraction tool
 bash build.sh
 sudo installer -pkg chm-docs-*.pkg -target /
 # Or double-click the .pkg file
@@ -42,13 +22,30 @@ sudo installer -pkg chm-docs-*.pkg -target /
 
 **Windows (PowerShell):**
 ```powershell
+winget install 7zip.7zip              # extraction tool
+winget install JRSoftware.InnoSetup   # installer builder
 .\build.ps1
-# Run the installer, or extract the zip to %LOCALAPPDATA%\chm-docs
+# Run chm-docs-X.Y.Z-setup.exe
 ```
 
-Build requires Python 3.13. On macOS also `chmlib`. On Windows also [7-Zip](https://7-zip.org) and [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`).
+Build requires Python 3.13.
 
-### 4. Configure Claude Code (MCP)
+### 2. Add the CHM file
+
+The CHM file is not included in the repo or installer. Copy `SIMPLSharpPro.chm` to the app's data directory:
+
+**Windows:** The tool checks these locations in order:
+1. `%LOCALAPPDATA%\chm-docs\SIMPLSharpPro.chm`
+2. `C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm` (auto-detected if Crestron DB is installed)
+
+**macOS:** Copy it to:
+```
+/usr/local/share/chm-docs/SIMPLSharpPro.chm
+```
+
+If the CHM can't be found, the tool prints an error showing exactly where it looked and where to place the file.
+
+### 3. Configure Claude Code (MCP)
 
 The included `.mcp.json` is configured for macOS. On Windows, update it:
 
@@ -64,7 +61,7 @@ The included `.mcp.json` is configured for macOS. On Windows, update it:
 
 Start Claude Code in this project directory — the 9 `chm-docs` tools appear automatically.
 
-### 5. First run
+### 4. First run
 
 The search index cache is built automatically on first run (~1 minute). After that, all queries are instant.
 
@@ -72,12 +69,11 @@ The search index cache is built automatically on first run (~1 minute). After th
 
 **macOS (.pkg):**
 - `/usr/local/lib/chm-docs/` — application bundle
-- `/usr/local/share/chm-docs/SIMPLSharpPro.chm` — SDK documentation
+- `/usr/local/share/chm-docs/` — place `SIMPLSharpPro.chm` here
 - `/usr/local/bin/chm-docs` — launcher
 
-**Windows (installer or zip):**
-- `%LOCALAPPDATA%\chm-docs\` — application bundle
-- CHM read directly from Crestron install path
+**Windows (installer):**
+- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM here)
 
 To upgrade, install the new package over the previous one.
 

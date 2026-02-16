@@ -22,6 +22,8 @@ from chm_search import CHMSearch
 
 _CRESTRON_CHM_PATH = r"C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm"
 
+_CHM_NAME = "SIMPLSharpPro.chm"
+
 
 def _resolve_chm_path() -> str:
     """Resolve the CHM file path using priority order:
@@ -31,38 +33,61 @@ def _resolve_chm_path() -> str:
     4. Crestron database install (Windows only)
     5. ./SIMPLSharpPro.chm (development fallback)
     """
+    candidates = []
+
     # 1. Environment variable
     env_path = os.environ.get("CHM_PATH")
-    if env_path and Path(env_path).exists():
-        return env_path
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return env_path
+        candidates.append(str(p))
 
     # 2. PyInstaller bundle
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        bundled = Path(meipass) / "SIMPLSharpPro.chm"
-        if bundled.exists():
-            return str(bundled)
+        p = Path(meipass) / _CHM_NAME
+        if p.exists():
+            return str(p)
+        candidates.append(str(p))
 
     # 3. Platform install location
     if platform.system() == "Windows":
-        installed = Path(os.environ.get("LOCALAPPDATA", "")) / "chm-docs" / "SIMPLSharpPro.chm"
+        p = Path(os.environ.get("LOCALAPPDATA", "")) / "chm-docs" / _CHM_NAME
     else:
-        installed = Path("/usr/local/share/chm-docs/SIMPLSharpPro.chm")
-    if installed.exists():
-        return str(installed)
+        p = Path("/usr/local/share/chm-docs") / _CHM_NAME
+    candidates.append(str(p))
+    if p.exists():
+        return str(p)
 
     # 4. Crestron database install (Windows)
-    if platform.system() == "Windows" and Path(_CRESTRON_CHM_PATH).exists():
-        return _CRESTRON_CHM_PATH
+    if platform.system() == "Windows":
+        p = Path(_CRESTRON_CHM_PATH)
+        candidates.append(str(p))
+        if p.exists():
+            return _CRESTRON_CHM_PATH
 
     # 5. Local development
-    local = Path(__file__).parent / "SIMPLSharpPro.chm"
-    if local.exists():
-        return str(local)
+    p = Path(__file__).parent / _CHM_NAME
+    candidates.append(str(p))
+    if p.exists():
+        return str(p)
+
+    # Build a helpful error with the platform-specific install path
+    if platform.system() == "Windows":
+        install_dir = str(Path(os.environ.get("LOCALAPPDATA", "")) / "chm-docs")
+    else:
+        install_dir = "/usr/local/share/chm-docs"
 
     raise FileNotFoundError(
-        "Cannot find SIMPLSharpPro.chm. Set CHM_PATH environment variable "
-        "or place the file in the current directory."
+        f"SIMPLSharpPro.chm not found.\n"
+        f"\n"
+        f"Copy it from a Windows machine with Crestron's database installed:\n"
+        f"  Source: C:\\Program Files (x86)\\Crestron\\Cresdb\\Help\\SIMPLSharpPro.chm\n"
+        f"  Destination: {install_dir}{os.sep}{_CHM_NAME}\n"
+        f"\n"
+        f"Searched:\n" +
+        "\n".join(f"  - {c}" for c in candidates)
     )
 
 

@@ -23,9 +23,8 @@ if ! command -v python3.13 &>/dev/null; then
 fi
 
 if [ ! -f "$CHM_FILE" ]; then
-    echo "ERROR: ${CHM_FILE} not found in ${SCRIPT_DIR}"
-    echo "Place the CHM file here before building."
-    exit 1
+    echo "NOTE: ${CHM_FILE} not found in ${SCRIPT_DIR} (not required for build)."
+    echo "After installing, copy it to /usr/local/share/chm-docs/"
 fi
 
 # Create/reuse venv for build dependencies
@@ -87,9 +86,8 @@ rm -rf "$PAYLOAD"
 mkdir -p "${PAYLOAD}/usr/local/lib/chm-docs"
 cp -R dist/chm-docs/* "${PAYLOAD}/usr/local/lib/chm-docs/"
 
-# /usr/local/share/chm-docs/ - CHM data file
+# /usr/local/share/chm-docs/ - directory for user to place CHM file
 mkdir -p "${PAYLOAD}/usr/local/share/chm-docs"
-cp "$CHM_FILE" "${PAYLOAD}/usr/local/share/chm-docs/"
 
 # /usr/local/bin/chm-docs - wrapper script
 mkdir -p "${PAYLOAD}/usr/local/bin"
