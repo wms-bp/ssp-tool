@@ -6,23 +6,28 @@ Exposes CHMSearch functionality as MCP tools for use with Claude Code
 and other MCP-compatible clients.
 """
 
-import contextlib
-import io
 import os
 import platform
 import sys
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
-
-# When running as a PyInstaller bundle, chm_search is bundled as a data file
-# and added to sys.path via the spec/hook. For dev mode, it's in the same dir.
-from chm_search import CHMSearch
-
 
 _CRESTRON_CHM_PATH = r"C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm"
 
 _CHM_NAME = "SIMPLSharpPro.chm"
+
+
+# Read version from VERSION file (bundled or local) — no heavy imports needed
+def _read_version() -> str:
+    for base in [getattr(sys, "_MEIPASS", None), Path(__file__).parent]:
+        if base:
+            p = Path(base) / "VERSION"
+            if p.exists():
+                return p.read_text().strip()
+    return "0.0.0"
+
+
+__version__ = _read_version()
 
 
 def _resolve_chm_path() -> str:
@@ -91,17 +96,40 @@ def _resolve_chm_path() -> str:
     )
 
 
-# Read version from VERSION file (bundled or local)
-def _read_version() -> str:
-    for base in [getattr(sys, "_MEIPASS", None), Path(__file__).parent]:
-        if base:
-            p = Path(base) / "VERSION"
-            if p.exists():
-                return p.read_text().strip()
-    return "0.0.0"
+# ---------------------------------------------------------------------------
+# Early dispatch — handle --version and CLI mode before heavy imports
+# ---------------------------------------------------------------------------
+
+def _run_cli(argv: list[str]):
+    """Run in CLI mode by delegating to chm_search.main() with resolved CHM path."""
+    from chm_search import main as cli_main
+
+    chm_path = _resolve_chm_path()
+    cli_main(["--chm", chm_path] + argv)
 
 
-__version__ = _read_version()
+if __name__ == "__main__":
+    args = sys.argv[1:]
+
+    if args and args[0] in ("--version", "-V"):
+        print(f"chm-docs {__version__}")
+        sys.exit(0)
+
+    if args:
+        _run_cli(args)
+        sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# MCP server setup — only runs if no CLI args (MCP mode) or imported as module
+# ---------------------------------------------------------------------------
+
+import contextlib
+
+from mcp.server.fastmcp import FastMCP
+
+from chm_search import CHMSearch
+
 
 # Redirect CHMSearch print() calls to stderr so they don't corrupt MCP stdio
 _stderr_redirect = contextlib.redirect_stdout(sys.stderr)
@@ -482,31 +510,8 @@ def show_document(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# MCP server entry point
 # ---------------------------------------------------------------------------
 
-def _run_cli(argv: list[str]):
-    """Run in CLI mode by delegating to chm_search.main() with resolved CHM path."""
-    from chm_search import main as cli_main
-
-    # Inject --chm with the resolved path so the CLI finds the CHM
-    # without requiring it in the current directory.
-    chm_path = _resolve_chm_path()
-    cli_main(["--chm", chm_path] + argv)
-
-
 if __name__ == "__main__":
-    import sys
-
-    args = sys.argv[1:]
-
-    if args and args[0] in ("--version", "-V"):
-        print(f"chm-docs {__version__}")
-        sys.exit(0)
-
-    # No args → MCP server mode
-    # Any subcommand (search, inspect, class, etc.) → CLI mode
-    if args:
-        _run_cli(args)
-    else:
-        mcp.run(transport="stdio")
+    mcp.run(transport="stdio")
