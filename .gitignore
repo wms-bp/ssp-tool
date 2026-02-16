@@ -26,7 +26,6 @@ win-payload/
 *.pkg
 *.spec
 *-setup.exe
-*-win.zip
 
 # OS
 .DS_Store

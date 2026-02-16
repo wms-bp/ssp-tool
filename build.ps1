@@ -4,7 +4,7 @@
     Build chm-docs MCP server as a Windows installer.
 .DESCRIPTION
     Creates a standalone .exe installer using PyInstaller and Inno Setup.
-    Requires: Python 3.13, 7-Zip, Inno Setup (optional, for .exe installer).
+    Requires: Python 3.13, 7-Zip, Inno Setup 6.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -110,17 +110,21 @@ Write-Host "Payload staged at $Payload"
 Write-Host ""
 
 # ---------------------------------------------------------------------------
-# 4. Create installer (Inno Setup) or zip fallback
+# 4. Create installer (Inno Setup)
 # ---------------------------------------------------------------------------
 $InnoCompiler = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-if ($InnoCompiler) {
-    Write-Host "--- Building installer with Inno Setup ---"
+if (-not $InnoCompiler) {
+    Write-Error "Inno Setup 6 not found. Install from https://jrsoftware.org/isinfo.php`nor: winget install JRSoftware.InnoSetup"
+    exit 1
+}
 
-    $IssContent = @"
+Write-Host "--- Building installer with Inno Setup ---"
+
+$IssContent = @"
 [Setup]
 AppName=CHM Docs MCP Server
 AppVersion=$Version
@@ -141,16 +145,10 @@ Source: "$Payload\$AppName\*"; DestDir: "{app}"; Flags: recursesubdirs
 Name: "{group}\Uninstall CHM Docs"; Filename: "{uninstallexe}"
 "@
 
-    $IssPath = Join-Path $ScriptDir "chm-docs.iss"
-    Set-Content -Path $IssPath -Value $IssContent
-    & $InnoCompiler $IssPath
-    Remove-Item $IssPath
-} else {
-    Write-Host "--- Inno Setup not found, creating zip ---"
-    $ZipName = "$AppName-$Version-win.zip"
-    Compress-Archive -Path "$Payload\$AppName\*" -DestinationPath $ZipName -Force
-    Write-Host "Created: $ZipName"
-}
+$IssPath = Join-Path $ScriptDir "chm-docs.iss"
+Set-Content -Path $IssPath -Value $IssContent
+& $InnoCompiler $IssPath
+Remove-Item $IssPath
 
 Write-Host ""
 Write-Host "=== Build complete ===" -ForegroundColor Green

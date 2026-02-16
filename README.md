@@ -46,7 +46,7 @@ sudo installer -pkg chm-docs-*.pkg -target /
 # Run the installer, or extract the zip to %LOCALAPPDATA%\chm-docs
 ```
 
-Build requires Python 3.13. On macOS also `chmlib`. On Windows also [7-Zip](https://7-zip.org) and optionally [Inno Setup 6](https://jrsoftware.org/isinfo.php) for an `.exe` installer (otherwise produces a `.zip`).
+Build requires Python 3.13. On macOS also `chmlib`. On Windows also [7-Zip](https://7-zip.org) and [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`).
 
 ### 4. Configure Claude Code (MCP)
 
