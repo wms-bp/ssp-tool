@@ -51,10 +51,11 @@ if (-not (Test-Path $Venv)) {
 & "$Venv\Scripts\Activate.ps1"
 
 # Install build dependencies
-$needInstall = $false
-try { python -c "import mcp" 2>$null } catch { $needInstall = $true }
-try { python -c "import PyInstaller" 2>$null } catch { $needInstall = $true }
-if ($needInstall) {
+python -c "import mcp" 2>$null
+$mcpMissing = $LASTEXITCODE -ne 0
+python -c "import PyInstaller" 2>$null
+$pyiMissing = $LASTEXITCODE -ne 0
+if ($mcpMissing -or $pyiMissing) {
     Write-Host "Installing build dependencies..."
     pip install --quiet mcp pyinstaller
 }
