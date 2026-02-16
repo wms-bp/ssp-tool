@@ -13,6 +13,7 @@ Set-Location $ScriptDir
 
 $Version = (Get-Content VERSION).Trim()
 $ChmFile = "SIMPLSharpPro.chm"
+$CrestronChmPath = "C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm"
 $AppName = "chm-docs"
 
 Write-Host "=== Building $AppName v$Version (Windows) ===" -ForegroundColor Cyan
@@ -31,9 +32,14 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 $pyVersion = python --version 2>&1
 Write-Host "Using: $pyVersion"
 
-if (-not (Test-Path $ChmFile)) {
-    Write-Error "$ChmFile not found in $ScriptDir`nCopy it from: C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm"
-    exit 1
+# CHM file not required in repo — the server finds it at the Crestron install path on first run.
+# But warn if it's not available anywhere (user may be building on a non-Crestron machine).
+if (-not (Test-Path $ChmFile) -and -not (Test-Path $CrestronChmPath)) {
+    Write-Host "WARNING: $ChmFile not found in repo or at Crestron install path." -ForegroundColor Yellow
+    Write-Host "The server will look for it at:" -ForegroundColor Yellow
+    Write-Host "  $CrestronChmPath" -ForegroundColor Yellow
+    Write-Host "The cache will be built on first run if the CHM is available." -ForegroundColor Yellow
+    Write-Host ""
 }
 
 # Create/reuse venv
@@ -95,13 +101,10 @@ Write-Host "--- Staging payload ---"
 $Payload = Join-Path $ScriptDir "win-payload"
 if (Test-Path $Payload) { Remove-Item -Recurse -Force $Payload }
 
-# App bundle
+# App bundle (CHM not included — server reads from Crestron install path at runtime)
 $AppDir = Join-Path $Payload $AppName
 New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
 Copy-Item -Recurse "dist\$AppName\*" $AppDir
-
-# CHM data file
-Copy-Item $ChmFile $AppDir
 
 Write-Host "Payload staged at $Payload"
 Write-Host ""

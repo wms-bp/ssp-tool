@@ -6,17 +6,16 @@ Available as both a CLI tool and an MCP server for Claude Code.
 
 ## Getting Started
 
-The CHM file is not included in this repo. You need to copy it from a Windows machine with Crestron's database installed.
+The CHM file is not included in this repo. The tool reads it from Crestron's install or a local copy.
 
 ### 1. Get the CHM file
 
-On your Windows machine, find the SDK documentation at:
-
+**Windows:** No action needed if Crestron's database is installed. The tool automatically finds it at:
 ```
 C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm
 ```
 
-Copy `SIMPLSharpPro.chm` into the root of this repo.
+**macOS:** Copy `SIMPLSharpPro.chm` from a Windows machine into the root of this repo.
 
 ### 2. Install prerequisites
 
@@ -58,6 +57,8 @@ Then start Claude Code in this project directory — the `chm-docs` tools appear
 >   }
 > }
 > ```
+
+The search index cache is built automatically on first run (~1 minute).
 
 #### CLI Tool — use directly with Python
 

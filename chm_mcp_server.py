@@ -20,12 +20,16 @@ from mcp.server.fastmcp import FastMCP
 from chm_search import CHMSearch
 
 
+_CRESTRON_CHM_PATH = r"C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm"
+
+
 def _resolve_chm_path() -> str:
     """Resolve the CHM file path using priority order:
     1. CHM_PATH environment variable
     2. PyInstaller bundle (sys._MEIPASS)
-    3. /usr/local/share/chm-docs/SIMPLSharpPro.chm (installed via .pkg)
-    4. ./SIMPLSharpPro.chm (development fallback)
+    3. Platform install location (macOS: /usr/local/share, Windows: %LOCALAPPDATA%)
+    4. Crestron database install (Windows only)
+    5. ./SIMPLSharpPro.chm (development fallback)
     """
     # 1. Environment variable
     env_path = os.environ.get("CHM_PATH")
@@ -39,7 +43,7 @@ def _resolve_chm_path() -> str:
         if bundled.exists():
             return str(bundled)
 
-    # 3. Installed location (platform-specific)
+    # 3. Platform install location
     if platform.system() == "Windows":
         installed = Path(os.environ.get("LOCALAPPDATA", "")) / "chm-docs" / "SIMPLSharpPro.chm"
     else:
@@ -47,7 +51,11 @@ def _resolve_chm_path() -> str:
     if installed.exists():
         return str(installed)
 
-    # 4. Local development
+    # 4. Crestron database install (Windows)
+    if platform.system() == "Windows" and Path(_CRESTRON_CHM_PATH).exists():
+        return _CRESTRON_CHM_PATH
+
+    # 5. Local development
     local = Path(__file__).parent / "SIMPLSharpPro.chm"
     if local.exists():
         return str(local)
