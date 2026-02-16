@@ -1208,7 +1208,7 @@ class CHMSearch:
         return result
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description='Search and browse CHM documentation files',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1307,7 +1307,7 @@ Examples:
                                                      help='Show count of examples by namespace')
     examples_summary_parser.add_argument('--json', '-j', action='store_true', help='Output as JSON')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.command:
         parser.print_help()

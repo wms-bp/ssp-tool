@@ -447,5 +447,23 @@ def show_document(path: str) -> str:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _run_cli(argv: list[str]):
+    """Run in CLI mode by delegating to chm_search.main() with resolved CHM path."""
+    from chm_search import main as cli_main
+
+    # Inject --chm with the resolved path so the CLI finds the CHM
+    # without requiring it in the current directory.
+    chm_path = _resolve_chm_path()
+    cli_main(["--chm", chm_path] + argv)
+
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    import sys
+
+    # No args or just "--" → MCP server mode
+    # Any subcommand (search, inspect, class, etc.) → CLI mode
+    args = sys.argv[1:]
+    if args:
+        _run_cli(args)
+    else:
+        mcp.run(transport="stdio")
