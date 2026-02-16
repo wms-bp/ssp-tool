@@ -38,9 +38,9 @@ The CHM file is not included in the repo or installer. Copy `SIMPLSharpPro.chm` 
 1. `%LOCALAPPDATA%\chm-docs\SIMPLSharpPro.chm`
 2. `C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm` (auto-detected if Crestron DB is installed)
 
-**macOS:** Copy it to:
-```
-/usr/local/share/chm-docs/SIMPLSharpPro.chm
+**macOS:**
+```bash
+sudo cp SIMPLSharpPro.chm /usr/local/share/chm-docs/
 ```
 
 If the CHM can't be found, the tool prints an error showing exactly where it looked and where to place the file.
@@ -61,7 +61,13 @@ The included `.mcp.json` is configured for macOS. On Windows, update it:
 
 Start Claude Code in this project directory — the 9 `chm-docs` tools appear automatically.
 
-### 4. First run
+### 4. Verify
+
+```bash
+chm-docs --version
+```
+
+### 5. First run
 
 The search index cache is built automatically on first run (~1 minute). After that, all queries are instant.
 

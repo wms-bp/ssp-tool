@@ -498,9 +498,14 @@ def _run_cli(argv: list[str]):
 if __name__ == "__main__":
     import sys
 
-    # No args or just "--" → MCP server mode
-    # Any subcommand (search, inspect, class, etc.) → CLI mode
     args = sys.argv[1:]
+
+    if args and args[0] in ("--version", "-V"):
+        print(f"chm-docs {__version__}")
+        sys.exit(0)
+
+    # No args → MCP server mode
+    # Any subcommand (search, inspect, class, etc.) → CLI mode
     if args:
         _run_cli(args)
     else:
