@@ -73,6 +73,7 @@ python -m PyInstaller `
     --onedir `
     --name $AppName `
     --add-data "chm_search.py;." `
+    --add-data "VERSION;." `
     --hidden-import mcp `
     --hidden-import mcp.server `
     --hidden-import mcp.server.fastmcp `

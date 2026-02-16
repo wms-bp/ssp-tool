@@ -91,6 +91,18 @@ def _resolve_chm_path() -> str:
     )
 
 
+# Read version from VERSION file (bundled or local)
+def _read_version() -> str:
+    for base in [getattr(sys, "_MEIPASS", None), Path(__file__).parent]:
+        if base:
+            p = Path(base) / "VERSION"
+            if p.exists():
+                return p.read_text().strip()
+    return "0.0.0"
+
+
+__version__ = _read_version()
+
 # Redirect CHMSearch print() calls to stderr so they don't corrupt MCP stdio
 _stderr_redirect = contextlib.redirect_stdout(sys.stderr)
 
@@ -99,6 +111,7 @@ mcp = FastMCP("chm-docs", instructions=(
     "Use search/search_title to find types, inspect for details, "
     "get_class_info for member listings, api_chain for event flows."
 ))
+mcp._mcp_server.version = __version__
 
 
 def _get_searcher() -> CHMSearch:
