@@ -356,6 +356,12 @@ def _format_example(result: dict) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+def version() -> str:
+    """Return the chm-docs server version."""
+    return f"chm-docs {__version__}"
+
+
+@mcp.tool()
 def search(query: str, limit: int = 20) -> str:
     """Full-text keyword search across all Crestron SIMPL# Pro SDK documentation.
 
