@@ -69,6 +69,10 @@ Write-Host ""
 Write-Host "--- Building _chmlib C extension ---"
 
 python setup.py build_ext --inplace
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to build _chmlib C extension"
+    exit 1
+}
 Write-Host "C extension built."
 Write-Host ""
 

@@ -1,4 +1,9 @@
+import sys
 from setuptools import setup, Extension
+
+define_macros = []
+if sys.platform == "win32":
+    define_macros.append(("WIN32", "1"))
 
 setup(
     name="chm-docs",
@@ -11,6 +16,7 @@ setup(
                 "vendor/chmlib/lzx.c",
             ],
             include_dirs=["vendor/chmlib"],
+            define_macros=define_macros,
         )
     ],
 )
