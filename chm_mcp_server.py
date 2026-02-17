@@ -530,4 +530,12 @@ def show_document(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Eagerly build cache so tool calls don't block on first use.
+    try:
+        searcher = _get_searcher()
+        searcher.ensure_extracted()
+        searcher.build_index()
+    except Exception as e:
+        print(f"Warning: cache init failed: {e}", file=sys.stderr)
+
     mcp.run(transport="stdio")
