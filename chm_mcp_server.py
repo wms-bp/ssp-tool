@@ -84,16 +84,39 @@ def _resolve_chm_path() -> str:
     else:
         install_dir = "/usr/local/share/chm-docs"
 
-    raise FileNotFoundError(
-        f"SIMPLSharpPro.chm not found.\n"
-        f"\n"
-        f"Copy it from a Windows machine with Crestron's database installed:\n"
-        f"  Source: C:\\Program Files (x86)\\Crestron\\Cresdb\\Help\\SIMPLSharpPro.chm\n"
-        f"  Destination: {install_dir}{os.sep}{_CHM_NAME}\n"
-        f"\n"
-        f"Searched:\n" +
+    if platform.system() == "Windows":
+        msg = (
+            f"SIMPLSharpPro.chm not found.\n"
+            f"\n"
+            f"Install the SIMPL# Pro library from Crestron:\n"
+            f"  https://www.crestron.com/Software-Firmware/Software/SIMPL-153;-Windows-174;/Crestron-Simpl-Sharp-Pro-with-Simpl-Sharp-Library/2-000-0058-01\n"
+            f"\n"
+            f"The CHM file is installed to:\n"
+            f"  C:\\Program Files (x86)\\Crestron\\Cresdb\\Help\\SIMPLSharpPro.chm\n"
+            f"\n"
+            f"Or copy it manually to:\n"
+            f"  {install_dir}{os.sep}{_CHM_NAME}\n"
+        )
+    else:
+        msg = (
+            f"SIMPLSharpPro.chm not found.\n"
+            f"\n"
+            f"Copy it to:\n"
+            f"  sudo cp SIMPLSharpPro.chm /usr/local/share/chm-docs/\n"
+            f"\n"
+            f"The CHM file can be found on a Windows machine with the SIMPL# Pro library installed:\n"
+            f"  C:\\Program Files (x86)\\Crestron\\Cresdb\\Help\\SIMPLSharpPro.chm\n"
+            f"\n"
+            f"Or download the library from:\n"
+            f"  https://www.crestron.com/Software-Firmware/Software/SIMPL-153;-Windows-174;/Crestron-Simpl-Sharp-Pro-with-Simpl-Sharp-Library/2-000-0058-01\n"
+        )
+
+    msg += (
+        f"\nSearched:\n" +
         "\n".join(f"  - {c}" for c in candidates)
     )
+
+    raise FileNotFoundError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -531,11 +554,10 @@ def show_document(path: str) -> str:
 
 if __name__ == "__main__":
     # Eagerly build cache so tool calls don't block on first use.
-    try:
-        searcher = _get_searcher()
-        searcher.ensure_extracted()
-        searcher.build_index()
-    except Exception as e:
-        print(f"Warning: cache init failed: {e}", file=sys.stderr)
+    # Fail loudly if CHM file is missing — the error message tells
+    # the user exactly where to place it.
+    searcher = _get_searcher()
+    searcher.ensure_extracted()
+    searcher.build_index()
 
     mcp.run(transport="stdio")
