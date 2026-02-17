@@ -149,6 +149,7 @@ if __name__ == "__main__":
 
 import contextlib
 import io
+import threading
 
 from mcp.server.fastmcp import FastMCP
 
@@ -171,20 +172,24 @@ mcp = FastMCP("chm-docs", instructions=(
 mcp._mcp_server.version = __version__
 
 
+_searcher_lock = threading.Lock()
+
+
 def _get_searcher() -> CHMSearch:
-    """Lazy-init the CHMSearch instance. Retries each call if CHM was
-    previously missing, so the server recovers once the file appears."""
-    if not hasattr(_get_searcher, "_instance"):
-        try:
-            chm_path = _resolve_chm_path()
-        except FileNotFoundError as e:
-            raise RuntimeError(str(e))
-        with _stderr_redirect:
-            instance = CHMSearch(chm_path)
-            instance.ensure_extracted()
-            instance.build_index()
-        _get_searcher._instance = instance
-    return _get_searcher._instance
+    """Lazy-init the CHMSearch instance. Thread-safe; retries if CHM was
+    previously missing so the server recovers once the file appears."""
+    with _searcher_lock:
+        if not hasattr(_get_searcher, "_instance"):
+            try:
+                chm_path = _resolve_chm_path()
+            except FileNotFoundError as e:
+                raise RuntimeError(str(e))
+            with _stderr_redirect:
+                instance = CHMSearch(chm_path)
+                instance.ensure_extracted()
+                instance.build_index()
+            _get_searcher._instance = instance
+        return _get_searcher._instance
 
 
 # ---------------------------------------------------------------------------
@@ -556,12 +561,14 @@ def show_document(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Eagerly build cache so tool calls don't block on first use.
-    # If CHM is missing, log the error but keep running — _get_searcher()
-    # retries on each tool call so it recovers once the file appears.
-    try:
-        _get_searcher()
-    except (FileNotFoundError, RuntimeError) as e:
-        print(f"chm-docs: {e}", file=sys.stderr)
+    # Warm cache in background so the MCP server starts immediately.
+    # If the CHM is missing, the error surfaces through tool calls.
+    def _warm_cache():
+        try:
+            _get_searcher()
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"chm-docs: {e}", file=sys.stderr)
+
+    threading.Thread(target=_warm_cache, daemon=True).start()
 
     mcp.run(transport="stdio")
