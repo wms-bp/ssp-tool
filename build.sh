@@ -65,6 +65,7 @@ python -m PyInstaller \
     --add-data "chm_search.py:." \
     --add-data "chmextract.py:." \
     --add-data "VERSION:." \
+    --hidden-import _chmlib \
     --hidden-import mcp \
     --hidden-import mcp.server \
     --hidden-import mcp.server.fastmcp \
