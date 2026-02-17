@@ -57,6 +57,8 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "--- Running PyInstaller ---"
 
+CHMLIB_SO=$(python -c "import _chmlib; print(_chmlib.__file__)")
+
 python -m PyInstaller \
     --noconfirm \
     --clean \
@@ -65,7 +67,7 @@ python -m PyInstaller \
     --add-data "chm_search.py:." \
     --add-data "chmextract.py:." \
     --add-data "VERSION:." \
-    --hidden-import _chmlib \
+    --add-binary "${CHMLIB_SO}:." \
     --hidden-import mcp \
     --hidden-import mcp.server \
     --hidden-import mcp.server.fastmcp \

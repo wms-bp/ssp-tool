@@ -77,6 +77,8 @@ Write-Host ""
 # ---------------------------------------------------------------------------
 Write-Host "--- Running PyInstaller ---"
 
+$ChmlibPyd = python -c "import _chmlib; print(_chmlib.__file__)"
+
 python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -85,7 +87,7 @@ python -m PyInstaller `
     --add-data "chm_search.py;." `
     --add-data "chmextract.py;." `
     --add-data "VERSION;." `
-    --hidden-import _chmlib `
+    --add-binary "$ChmlibPyd;." `
     --hidden-import mcp `
     --hidden-import mcp.server `
     --hidden-import mcp.server.fastmcp `
