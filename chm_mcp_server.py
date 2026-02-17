@@ -554,10 +554,16 @@ def show_document(path: str) -> str:
 
 if __name__ == "__main__":
     # Eagerly build cache so tool calls don't block on first use.
-    # Fail loudly if CHM file is missing — the error message tells
-    # the user exactly where to place it.
-    searcher = _get_searcher()
-    searcher.ensure_extracted()
-    searcher.build_index()
+    # Fail loudly if CHM file is missing — print a clean error
+    # (not a traceback) so the user sees actionable instructions.
+    try:
+        searcher = _get_searcher()
+        searcher.ensure_extracted()
+        searcher.build_index()
+    except (FileNotFoundError, RuntimeError) as e:
+        print(f"\n{'='*60}", file=sys.stderr)
+        print(f"FATAL: {e}", file=sys.stderr)
+        print(f"{'='*60}\n", file=sys.stderr)
+        sys.exit(1)
 
     mcp.run(transport="stdio")
