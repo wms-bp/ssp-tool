@@ -147,7 +147,6 @@ if __name__ == "__main__":
 # MCP server setup — only runs if no CLI args (MCP mode) or imported as module
 # ---------------------------------------------------------------------------
 
-import contextlib
 import io
 import threading
 
@@ -160,9 +159,6 @@ from chm_search import CHMSearch
 # so progress messages (which write to stderr directly) are visible.
 if sys.stderr is None:
     sys.stderr = io.open(os.devnull, "w")
-
-# Redirect any stray stdout print() calls to stderr so they don't corrupt MCP stdio.
-_stderr_redirect = contextlib.redirect_stdout(sys.stderr)
 
 mcp = FastMCP("chm-docs", instructions=(
     "Crestron SIMPL# Pro SDK documentation search. "
@@ -184,10 +180,9 @@ def _get_searcher() -> CHMSearch:
                 chm_path = _resolve_chm_path()
             except FileNotFoundError as e:
                 raise RuntimeError(str(e))
-            with _stderr_redirect:
-                instance = CHMSearch(chm_path)
-                instance.ensure_extracted()
-                instance.build_index()
+            instance = CHMSearch(chm_path)
+            instance.ensure_extracted()
+            instance.build_index()
             _get_searcher._instance = instance
         return _get_searcher._instance
 
@@ -414,8 +409,7 @@ def search(query: str, limit: int = 20) -> str:
         limit: Maximum number of results (default 20)
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        results = chm.search(query, limit)
+    results = chm.search(query, limit)
     return _format_search_results(results, query)
 
 
@@ -431,8 +425,7 @@ def search_title(query: str, limit: int = 20) -> str:
         limit: Maximum number of results (default 20)
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        results = chm.search_title(query, limit)
+    results = chm.search_title(query, limit)
     return _format_title_results(results, query)
 
 
@@ -448,8 +441,7 @@ def inspect(type_name: str) -> str:
         type_name: Type/member name or document path to inspect
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        info = chm.inspect(type_name)
+    info = chm.inspect(type_name)
     if not info:
         return f"Type not found: {type_name}"
     return _format_inspect(info)
@@ -466,13 +458,12 @@ def get_class_info(class_name: str) -> str:
         class_name: Class name to look up (e.g. "BasicTriList", "ClwDimswex")
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        # Check if it's actually an enum
-        enum_check = chm.inspect(class_name)
-        if enum_check and enum_check.get("category") == "enum" and enum_check.get("enum_members"):
-            return _format_inspect(enum_check)
+    # Check if it's actually an enum
+    enum_check = chm.inspect(class_name)
+    if enum_check and enum_check.get("category") == "enum" and enum_check.get("enum_members"):
+        return _format_inspect(enum_check)
 
-        info = chm.get_class_info(class_name)
+    info = chm.get_class_info(class_name)
     if not info:
         return f"Class not found: {class_name}"
     return _format_class_info(info)
@@ -491,8 +482,7 @@ def api_chain(class_name: str, member_name: str | None = None) -> str:
         member_name: Optional member to focus on (e.g. "LoadStateChange")
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        chain = chm.api_chain(class_name, member_name)
+    chain = chm.api_chain(class_name, member_name)
     return _format_api_chain(chain)
 
 
@@ -505,8 +495,7 @@ def browse_namespace(namespace: str, limit: int = 50) -> str:
         limit: Maximum number of results (default 50)
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        results = chm.browse_namespace(namespace, limit)
+    results = chm.browse_namespace(namespace, limit)
     return _format_browse(results, namespace)
 
 
@@ -518,8 +507,7 @@ def list_namespaces() -> str:
     explore a specific namespace.
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        results = chm.list_namespaces()
+    results = chm.list_namespaces()
     return _format_namespaces(results)
 
 
@@ -531,8 +519,7 @@ def get_example(type_name: str) -> str:
         type_name: Type name or document path (e.g. "BasicTriList", "html/abc123.htm")
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        result = chm.get_example(type_name)
+    result = chm.get_example(type_name)
     if not result:
         return f"No example found for: {type_name}"
     return _format_example(result)
@@ -549,8 +536,7 @@ def show_document(path: str) -> str:
         path: Document path (e.g. "html/abc123.htm")
     """
     chm = _get_searcher()
-    with _stderr_redirect:
-        content = chm.show(path)
+    content = chm.show(path)
     if not content:
         return f"Document not found: {path}"
     return content
