@@ -1,6 +1,8 @@
-# CHM Documentation Search Tool
+# SIMPLSharp Pro Search Tool
 
-Search and navigate Crestron SIMPL# Pro SDK documentation (~55,000 documents). Works as both a CLI tool and an MCP server for Claude Code.
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/connectedavs)
+
+Navigate the Crestron SIMPL# Pro SDK so you don't have to. Turns a sprawling CHM file into searchable, structured knowledge -- as a CLI tool or an MCP server for Claude Code.
 
 The installed binary (`chm-docs`) runs in two modes:
 - **No arguments** — starts as an MCP server (stdio) for Claude Code
