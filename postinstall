@@ -1,0 +1,45 @@
+#!/bin/bash
+# Configure Claude Code global MCP settings for chm-docs
+# Runs as root after macOS .pkg install
+
+# Find the real user (installer runs as root)
+REAL_USER="${SUDO_USER:-$(stat -f '%Su' /dev/console)}"
+REAL_HOME=$(eval echo "~$REAL_USER")
+
+CONFIG_DIR="$REAL_HOME/.claude"
+CONFIG_FILE="$CONFIG_DIR/mcp.json"
+
+mkdir -p "$CONFIG_DIR"
+chown "$REAL_USER" "$CONFIG_DIR"
+
+if [ -f "$CONFIG_FILE" ]; then
+    # Add chm-docs to existing config (python3 ships with macOS)
+    python3 -c "
+import json, sys
+try:
+    with open('$CONFIG_FILE') as f:
+        config = json.load(f)
+except (json.JSONDecodeError, ValueError):
+    import shutil
+    shutil.copy('$CONFIG_FILE', '$CONFIG_FILE.bak')
+    config = {'mcpServers': {}}
+
+config.setdefault('mcpServers', {})['chm-docs'] = {'command': '/usr/local/bin/chm-docs'}
+
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+    f.write('\n')
+" 2>/dev/null || true
+else
+    cat > "$CONFIG_FILE" << 'MCPJSON'
+{
+  "mcpServers": {
+    "chm-docs": {
+      "command": "/usr/local/bin/chm-docs"
+    }
+  }
+}
+MCPJSON
+fi
+
+chown "$REAL_USER" "$CONFIG_FILE"

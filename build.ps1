@@ -107,6 +107,7 @@ if (Test-Path $Payload) { Remove-Item -Recurse -Force $Payload }
 $AppDir = Join-Path $Payload $AppName
 New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
 Copy-Item -Recurse "dist\$AppName\*" $AppDir
+Copy-Item "configure-mcp.ps1" $AppDir
 
 Write-Host "Payload staged at $Payload"
 Write-Host ""
@@ -149,6 +150,9 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 
 [Icons]
 Name: "{group}\Uninstall CHM Docs"; Filename: "{uninstallexe}"
+
+[Run]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& '{app}\configure-mcp.ps1'"""; StatusMsg: "Configuring Claude Code MCP..."; Flags: runhidden
 
 [Code]
 function NeedsAddPath(Param: string): boolean;

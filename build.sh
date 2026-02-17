@@ -102,12 +102,22 @@ echo "Payload staged at ${PAYLOAD}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 4. Build .pkg
+# 4. Stage postinstall script (configures Claude Code MCP)
+# ---------------------------------------------------------------------------
+SCRIPTS="${SCRIPT_DIR}/pkg-scripts"
+rm -rf "$SCRIPTS"
+mkdir -p "$SCRIPTS"
+cp "${SCRIPT_DIR}/postinstall" "${SCRIPTS}/postinstall"
+chmod +x "${SCRIPTS}/postinstall"
+
+# ---------------------------------------------------------------------------
+# 5. Build .pkg
 # ---------------------------------------------------------------------------
 echo "--- Building ${PKG_NAME} ---"
 
 pkgbuild \
     --root "$PAYLOAD" \
+    --scripts "$SCRIPTS" \
     --identifier "$PKG_ID" \
     --version "$VERSION" \
     --install-location / \
