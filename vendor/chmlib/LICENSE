@@ -1,0 +1,17 @@
+CHMLib - vendored from https://github.com/jedwing/CHMLib
+
+chm_lib.c, chm_lib.h
+  Author: Jed Wing <jedwin@ugcs.caltech.edu>
+  License: GNU Lesser General Public License v2.1 or later (LGPL-2.1-or-later)
+
+lzx.c, lzx.h
+  Maintainer: Jed Wing <jedwin@ugcs.caltech.edu>
+  Source: modified lzx.c from cabextract v0.5 (originally from unlzx)
+  License: GNU General Public License v2 or later (GPL-2.0-or-later)
+  Note: An exemption to the GPL has been granted by Stuart Caie
+        (original cabextract author) for the purposes of distribution
+        with chmlib.
+
+Full license texts are available at:
+  LGPL-2.1: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+  GPL-2.0:  https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
