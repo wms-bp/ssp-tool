@@ -125,14 +125,16 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 import contextlib
+import io
 
 from mcp.server.fastmcp import FastMCP
 
 from chm_search import CHMSearch
 
 
-# Redirect CHMSearch print() calls to stderr so they don't corrupt MCP stdio
-_stderr_redirect = contextlib.redirect_stdout(sys.stderr)
+# Redirect CHMSearch print() calls to stderr so they don't corrupt MCP stdio.
+# On Windows without a console, sys.stderr may be None — fall back to devnull.
+_stderr_redirect = contextlib.redirect_stdout(sys.stderr or io.open(os.devnull, "w"))
 
 mcp = FastMCP("chm-docs", instructions=(
     "Crestron SIMPL# Pro SDK documentation search. "
@@ -143,9 +145,13 @@ mcp._mcp_server.version = __version__
 
 
 def _get_searcher() -> CHMSearch:
-    """Lazy-init the CHMSearch instance."""
+    """Lazy-init the CHMSearch instance. Raises RuntimeError with a helpful
+    message if the CHM file can't be found."""
     if not hasattr(_get_searcher, "_instance"):
-        chm_path = _resolve_chm_path()
+        try:
+            chm_path = _resolve_chm_path()
+        except FileNotFoundError as e:
+            raise RuntimeError(str(e))
         with _stderr_redirect:
             _get_searcher._instance = CHMSearch(chm_path)
     return _get_searcher._instance
