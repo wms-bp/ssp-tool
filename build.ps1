@@ -4,7 +4,7 @@
     Build chm-docs MCP server as a Windows installer.
 .DESCRIPTION
     Creates a standalone .exe installer using PyInstaller and Inno Setup.
-    Requires: Python 3.13, 7-Zip, Inno Setup 6.
+    Requires: Python 3.13, Inno Setup 6, C compiler (MSVC).
 #>
 
 $ErrorActionPreference = "Stop"
@@ -57,14 +57,23 @@ python -c "import PyInstaller" 2>$null
 $pyiMissing = $LASTEXITCODE -ne 0
 if ($mcpMissing -or $pyiMissing) {
     Write-Host "Installing build dependencies..."
-    pip install --quiet mcp pyinstaller
+    pip install --quiet mcp pyinstaller setuptools
 }
 
 Write-Host "All prerequisites met."
 Write-Host ""
 
 # ---------------------------------------------------------------------------
-# 2. PyInstaller build (--onedir)
+# 2. Build _chmlib C extension (vendored CHMLib)
+# ---------------------------------------------------------------------------
+Write-Host "--- Building _chmlib C extension ---"
+
+python setup.py build_ext --inplace
+Write-Host "C extension built."
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# 3. PyInstaller build (--onedir)
 # ---------------------------------------------------------------------------
 Write-Host "--- Running PyInstaller ---"
 
@@ -74,6 +83,7 @@ python -m PyInstaller `
     --onedir `
     --name $AppName `
     --add-data "chm_search.py;." `
+    --add-data "chmextract.py;." `
     --add-data "VERSION;." `
     --hidden-import mcp `
     --hidden-import mcp.server `
@@ -96,7 +106,7 @@ Write-Host "PyInstaller build complete."
 Write-Host ""
 
 # ---------------------------------------------------------------------------
-# 3. Stage payload
+# 4. Stage payload
 # ---------------------------------------------------------------------------
 Write-Host "--- Staging payload ---"
 
@@ -113,7 +123,7 @@ Write-Host "Payload staged at $Payload"
 Write-Host ""
 
 # ---------------------------------------------------------------------------
-# 4. Create installer (Inno Setup)
+# 5. Create installer (Inno Setup)
 # ---------------------------------------------------------------------------
 $InnoCompiler = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"

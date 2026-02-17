@@ -37,14 +37,23 @@ source "${VENV}/bin/activate"
 
 if ! python -c "import mcp" &>/dev/null || ! python -c "import PyInstaller" &>/dev/null; then
     echo "Installing build dependencies..."
-    pip install --quiet mcp pyinstaller
+    pip install --quiet mcp pyinstaller setuptools
 fi
 
 echo "All prerequisites met."
 echo ""
 
 # ---------------------------------------------------------------------------
-# 2. PyInstaller build (--onedir)
+# 2. Build _chmlib C extension (vendored CHMLib)
+# ---------------------------------------------------------------------------
+echo "--- Building _chmlib C extension ---"
+
+python setup.py build_ext --inplace
+echo "C extension built."
+echo ""
+
+# ---------------------------------------------------------------------------
+# 3. PyInstaller build (--onedir)
 # ---------------------------------------------------------------------------
 echo "--- Running PyInstaller ---"
 
@@ -54,6 +63,7 @@ python -m PyInstaller \
     --onedir \
     --name chm-docs \
     --add-data "chm_search.py:." \
+    --add-data "chmextract.py:." \
     --add-data "VERSION:." \
     --hidden-import mcp \
     --hidden-import mcp.server \
@@ -76,7 +86,7 @@ echo "PyInstaller build complete."
 echo ""
 
 # ---------------------------------------------------------------------------
-# 3. Stage payload for .pkg
+# 4. Stage payload for .pkg
 # ---------------------------------------------------------------------------
 echo "--- Staging payload ---"
 
@@ -102,7 +112,7 @@ echo "Payload staged at ${PAYLOAD}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 4. Stage postinstall script (configures Claude Code MCP)
+# 5. Stage postinstall script (configures Claude Code MCP)
 # ---------------------------------------------------------------------------
 SCRIPTS="${SCRIPT_DIR}/pkg-scripts"
 rm -rf "$SCRIPTS"
@@ -111,7 +121,7 @@ cp "${SCRIPT_DIR}/postinstall" "${SCRIPTS}/postinstall"
 chmod +x "${SCRIPTS}/postinstall"
 
 # ---------------------------------------------------------------------------
-# 5. Build .pkg
+# 6. Build .pkg
 # ---------------------------------------------------------------------------
 echo "--- Building ${PKG_NAME} ---"
 

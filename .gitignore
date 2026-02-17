@@ -8,6 +8,8 @@ __pycache__/
 *$py.class
 .Python
 *.so
+*.pyd
+*.egg-info/
 
 # Cache directories
 .cache/

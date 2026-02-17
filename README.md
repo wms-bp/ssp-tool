@@ -246,14 +246,12 @@ Both platforms produce a standalone binary — no Python needed at runtime. Buil
 
 **macOS:**
 ```bash
-brew install chmlib        # extraction tool (runtime dependency)
 bash build.sh
 sudo installer -pkg chm-docs-*.pkg -target /
 ```
 
 **Windows (PowerShell):**
 ```powershell
-winget install 7zip.7zip              # extraction tool (runtime dependency)
 winget install JRSoftware.InnoSetup   # installer builder
 .\build.ps1
 # Run chm-docs-X.Y.Z-setup.exe
