@@ -282,3 +282,7 @@ To rebuild the index:
 ```bash
 chm-docs rebuild
 ```
+
+## Known Issues
+
+- **Windows (ARM):** First-run cache build (extraction + indexing) can take up to 5 minutes. Subsequent launches are instant.
