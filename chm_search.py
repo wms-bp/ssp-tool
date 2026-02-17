@@ -329,8 +329,15 @@ class CHMSearch:
         self.ensure_extracted()
 
         if self.db_path.exists() and not force:
-            print("Using existing index. Use --rebuild to force rebuild.", file=sys.stderr)
-            return
+            try:
+                conn = sqlite3.connect(str(self.db_path))
+                count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+                conn.close()
+                if count > 0:
+                    print("Using existing index. Use --rebuild to force rebuild.", file=sys.stderr)
+                    return
+            except Exception:
+                pass
 
         print("Building search index...", file=sys.stderr)
 
