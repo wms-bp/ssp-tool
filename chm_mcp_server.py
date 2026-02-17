@@ -171,9 +171,14 @@ mcp = FastMCP("chm-docs", instructions=(
 mcp._mcp_server.version = __version__
 
 
+_startup_error = None
+
+
 def _get_searcher() -> CHMSearch:
     """Lazy-init the CHMSearch instance. Raises RuntimeError with a helpful
     message if the CHM file can't be found."""
+    if _startup_error:
+        raise RuntimeError(_startup_error)
     if not hasattr(_get_searcher, "_instance"):
         try:
             chm_path = _resolve_chm_path()
@@ -554,16 +559,14 @@ def show_document(path: str) -> str:
 
 if __name__ == "__main__":
     # Eagerly build cache so tool calls don't block on first use.
-    # Fail loudly if CHM file is missing — print a clean error
-    # (not a traceback) so the user sees actionable instructions.
+    # If CHM is missing, store the error and let the server start —
+    # the error surfaces through tool calls so Claude can relay it.
     try:
         searcher = _get_searcher()
         searcher.ensure_extracted()
         searcher.build_index()
     except (FileNotFoundError, RuntimeError) as e:
-        print(f"\n{'='*60}", file=sys.stderr)
-        print(f"FATAL: {e}", file=sys.stderr)
-        print(f"{'='*60}\n", file=sys.stderr)
-        sys.exit(1)
+        _startup_error = str(e)
+        print(f"chm-docs: {e}", file=sys.stderr)
 
     mcp.run(transport="stdio")
