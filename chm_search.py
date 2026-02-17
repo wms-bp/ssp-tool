@@ -298,7 +298,7 @@ class CHMSearch:
     def ensure_extracted(self):
         """Ensure CHM content is extracted."""
         if not self.extract_dir.exists():
-            print(f"Extracting CHM file to cache... (this may take a moment)")
+            print("Extracting CHM file to cache... (this may take a moment)", file=sys.stderr)
             self.extract_dir.mkdir(parents=True, exist_ok=True)
             try:
                 self._extract_chm()
@@ -306,7 +306,7 @@ class CHMSearch:
                 # Clean up partial extraction on failure
                 shutil.rmtree(self.extract_dir, ignore_errors=True)
                 raise
-            print("Extraction complete.")
+            print("Extraction complete.", file=sys.stderr)
 
     def _extract_chm(self):
         """Extract CHM using vendored chmlib C extension."""
@@ -329,10 +329,10 @@ class CHMSearch:
         self.ensure_extracted()
 
         if self.db_path.exists() and not force:
-            print("Using existing index. Use --rebuild to force rebuild.")
+            print("Using existing index. Use --rebuild to force rebuild.", file=sys.stderr)
             return
 
-        print("Building search index...")
+        print("Building search index...", file=sys.stderr)
 
         conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA journal_mode=WAL")
@@ -369,7 +369,7 @@ class CHMSearch:
         # Process HTML files
         html_dir = self.extract_dir / 'html'
         if not html_dir.exists():
-            print("Warning: No html directory found in extracted CHM")
+            print("Warning: No html directory found in extracted CHM", file=sys.stderr)
             conn.close()
             return
 
@@ -378,7 +378,7 @@ class CHMSearch:
 
         for i, htm_file in enumerate(htm_files):
             if (i + 1) % 1000 == 0:
-                print(f"  Indexed {i + 1}/{total} files...")
+                print(f"  Indexed {i + 1}/{total} files...", file=sys.stderr)
 
             try:
                 content = htm_file.read_text(encoding='utf-8', errors='replace')
@@ -399,7 +399,7 @@ class CHMSearch:
                 ))
 
             except Exception as e:
-                print(f"Warning: Failed to index {htm_file.name}: {e}")
+                print(f"Warning: Failed to index {htm_file.name}: {e}", file=sys.stderr)
 
         # Populate FTS
         cursor.execute('''
@@ -409,7 +409,7 @@ class CHMSearch:
 
         conn.commit()
         conn.close()
-        print(f"Index built with {total} documents.")
+        print(f"Index built with {total} documents.", file=sys.stderr)
 
     def parse_toc(self) -> list:
         """Parse the table of contents (HHC file)."""

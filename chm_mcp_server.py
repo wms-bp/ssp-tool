@@ -132,9 +132,13 @@ from mcp.server.fastmcp import FastMCP
 from chm_search import CHMSearch
 
 
-# Redirect CHMSearch print() calls to stderr so they don't corrupt MCP stdio.
-# On Windows without a console, sys.stderr may be None — fall back to devnull.
-_stderr_redirect = contextlib.redirect_stdout(sys.stderr or io.open(os.devnull, "w"))
+# On Windows without a console, sys.stderr may be None — ensure it's usable
+# so progress messages (which write to stderr directly) are visible.
+if sys.stderr is None:
+    sys.stderr = io.open(os.devnull, "w")
+
+# Redirect any stray stdout print() calls to stderr so they don't corrupt MCP stdio.
+_stderr_redirect = contextlib.redirect_stdout(sys.stderr)
 
 mcp = FastMCP("chm-docs", instructions=(
     "Crestron SIMPL# Pro SDK documentation search. "
