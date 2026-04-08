@@ -338,7 +338,7 @@ def extract_signals_from_table(html_content: str) -> list:
 _SIG_TYPE_RE = re.compile(
     r'(Digital|Analog|Serial)\s+(input|output)s?\s*:', re.IGNORECASE
 )
-_PARAM_TYPE_RE = re.compile(r'Parameter\s*:', re.IGNORECASE)
+_PARAM_TYPE_RE = re.compile(r'Parameters?\s*:', re.IGNORECASE)
 
 
 def _parse_signal_cell(text: str, html_content: str) -> list:
