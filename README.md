@@ -1,8 +1,12 @@
-# SIMPLSharp Pro Search Tool
+# Crestron CHM Documentation Search Tool
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/connectedavs)
 
-Navigate the Crestron SIMPL# Pro SDK so you don't have to. Turns a sprawling CHM file into searchable, structured knowledge -- as a CLI tool or an MCP server for Claude Code.
+Navigate the Crestron SIMPL# Pro SDK and SIMPL Windows device documentation so you don't have to. Turns sprawling CHM files into searchable, structured knowledge -- as a CLI tool or an MCP server for Claude Code.
+
+Supports two CHM sources:
+- **SIMPLSharpPro.chm** — C# SDK API documentation (classes, methods, events, properties)
+- **SIMPL_Windows.chm** — Device signal documentation (digital/analog/serial I/O, parameters, slot structure)
 
 The installed binary (`chm-docs`) runs in two modes:
 - **No arguments** — starts as an MCP server (stdio) for Claude Code
@@ -17,20 +21,25 @@ Download the latest release for your platform from [Releases](../../releases):
 - **macOS:** `chm-docs-X.Y.Z.pkg` — double-click or `sudo installer -pkg chm-docs-*.pkg -target /`
 - **Windows:** `chm-docs-X.Y.Z-setup.exe` — run the installer
 
-### 2. Add the CHM file
+### 2. Add the CHM files
 
-The CHM file is not included in the release. Copy `SIMPLSharpPro.chm` to the app's data directory:
+The CHM files are not included in the release. Copy them to the app's data directory:
+
+**macOS:**
+```bash
+sudo cp SIMPLSharpPro.chm /usr/local/share/chm-docs/
+sudo cp SIMPL_Windows.chm /usr/local/share/chm-docs/   # optional
+```
 
 **Windows:** The tool checks these locations in order:
 1. `%LOCALAPPDATA%\chm-docs\SIMPLSharpPro.chm`
 2. `C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm` (auto-detected if Crestron DB is installed)
 
-**macOS:**
-```bash
-sudo cp SIMPLSharpPro.chm /usr/local/share/chm-docs/
-```
+For SIMPL Windows:
+1. `%LOCALAPPDATA%\chm-docs\SIMPL_Windows.chm`
+2. `C:\Program Files (x86)\Crestron\Simpl\SIMPL_Windows.chm`
 
-If the CHM can't be found, the tool prints an error showing exactly where it looked and where to place the file.
+If a CHM can't be found, the tool prints an error showing exactly where it looked. The S#Pro CHM is required; the SIMPL Windows CHM is optional but enables signal descriptions and cross-referencing.
 
 ### 3. Configure Claude Code (MCP)
 
@@ -56,11 +65,13 @@ chm-docs --version
 
 ### 5. First run
 
-The search index cache is built automatically on first run (~1 minute). After that, all queries are instant.
+The search index cache is built automatically on first run (~1 minute per CHM). After that, all queries are instant.
 
 ## MCP Tools
 
 When running as an MCP server, these tools are available to Claude Code:
+
+### SIMPL# Pro (default)
 
 | Tool | Description |
 |------|-------------|
@@ -68,11 +79,50 @@ When running as an MCP server, these tools are available to Claude Code:
 | `search_title` | Title-only search for precise type/member lookup |
 | `inspect` | Detailed view of any type — signature, params, enum values, references |
 | `get_class_info` | Class overview with members grouped by category |
-| `api_chain` | Trace event/property chains: class → delegate → eventargs → properties |
+| `api_chain` | Trace event/property chains: class -> delegate -> eventargs -> properties |
 | `browse_namespace` | List all types within a namespace |
 | `list_namespaces` | List all SDK namespaces with item counts |
 | `get_example` | Get C# code example for a type |
 | `show_document` | Read full document text by path |
+
+All tools above accept `chm='simpl'` to query SIMPL Windows instead.
+
+### SIMPL Windows
+
+| Tool | Description |
+|------|-------------|
+| `search_signals` | Search signal definitions by name or description, optionally filtered by type |
+| `get_device_signals` | Get all signals for a device grouped by slot with full descriptions |
+
+### Cross-Referencing
+
+| Tool | Description |
+|------|-------------|
+| `cross_reference` | Given a device name (SIMPL or S#Pro format), show all signals with S#Pro type mappings |
+| `cross_reference_member` | Traverse from an S#Pro class member to its SIMPL Windows signal with full description |
+
+**Signal type mapping:**
+
+| SIMPL Windows | SIMPL# Pro |
+|---|---|
+| Digital input/output | BooleanInput/BooleanOutput |
+| Analog input/output | UShortInput/UShortOutput |
+| Serial input/output | StringInput/StringOutput |
+| Parameter | Compile-time config |
+
+**Cross-reference workflow:**
+```
+# Start from S#Pro, get SIMPL signal descriptions
+cross_reference_member("ClwDimFlvExP", "DimmerRemoteButtonSettings")
+cross_reference_member("ClwDimFlvExP", "LevelIn")
+
+# Start from SIMPL, get S#Pro type mappings
+cross_reference("CLW-DIMFLVEX-P")
+get_device_signals("CLW-DIMFLVEX-P")
+
+# Both directions accept either naming convention
+cross_reference("ClwDimuEx")  # S#Pro name → finds CLW-DIMUEX-P
+```
 
 ## CLI Commands
 
@@ -101,7 +151,7 @@ chm-docs search "Button" --limit 50
 | `enum <name>` | `e` | Show enumeration values |
 | `inspect <type>` | `i` | Detailed view of a type with all referenced types |
 | `traverse <type>` | `tr` | Follow the type tree recursively |
-| `api <class> [member]` | `a` | Follow API chains (event → handler → parameters) |
+| `api <class> [member]` | `a` | Follow API chains (event -> handler -> parameters) |
 
 ```bash
 chm-docs class HttpClient
@@ -176,19 +226,15 @@ ClwDimswex Class
           Properties: EventId, Index, Load
 ```
 
-### Following Property Return Types
+### Cross-Referencing Signal Descriptions
 
-```bash
-chm-docs api LoadEventArgs Load
-```
+When the S#Pro docs don't explain a property well enough, get the SIMPL Windows signal description:
 
-Output:
 ```
-LoadEventArgs Class
-  └─> Load Property
-      Signature: public LightLoad Load { get; }
-    └─> LightLoad Class
-        Properties: DeviceLoadIsOn, Number, Parent, Type, ...
+# Via MCP: cross_reference_member("ClwDimFlvExP", "LevelIn")
+# Returns: Level_In [A-In -> UShortInput]: Sets the light level. Valid analog
+# values range from 0% (Off) to 100%. This signal should be tied together with
+# the Level_Out output...
 ```
 
 ### Looking Up Constants and Enums
@@ -208,19 +254,13 @@ chm-docs examples-summary
 chm-docs example "Din1Dim4 Class"
 ```
 
-When inspecting a type, the tool indicates if an example exists:
-```
-*** This document has a CODE EXAMPLE ***
-    Use the get_example tool with "Din1Dim4 Class"
-```
-
 ## Common Patterns in SIMPL# Pro SDK
 
 ### Event Handlers
 
 Events follow this pattern:
-- **Event** (e.g., `LoadStateChange`) → returns a **Delegate** type
-- **Delegate** (e.g., `LoadEventHandler`) → defines parameters
+- **Event** (e.g., `LoadStateChange`) -> returns a **Delegate** type
+- **Delegate** (e.g., `LoadEventHandler`) -> defines parameters
 - **Parameters** typically include the device and an **EventArgs** class
 
 ```bash
@@ -263,11 +303,11 @@ winget install JRSoftware.InnoSetup   # installer builder
 
 **macOS (.pkg):**
 - `/usr/local/lib/chm-docs/` — application bundle
-- `/usr/local/share/chm-docs/` — place `SIMPLSharpPro.chm` here
+- `/usr/local/share/chm-docs/` — place CHM files here
 - `/usr/local/bin/chm-docs` — launcher
 
 **Windows (installer):**
-- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM here)
+- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM files here)
 
 To upgrade, install the new package over the previous one.
 
