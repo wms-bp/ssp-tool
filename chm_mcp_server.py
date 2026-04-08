@@ -262,33 +262,26 @@ def _format_title_results(results: list, query: str) -> str:
 
 def _format_inspect(info: dict) -> str:
     lines = []
-    lines.append(f"{'=' * 70}")
-    lines.append(f"Title: {info['title']}")
-    lines.append(f"Category: {info['category']}")
+    lines.append(f"{info['title']} [{info['category']}]")
     lines.append(f"Namespace: {info['namespace']}")
     lines.append(f"Path: {info['path']}")
     if info.get("description"):
-        lines.append(f"Description: {info['description']}")
-    lines.append(f"{'=' * 70}")
+        lines.append(f"{info['description']}")
 
     if info.get("signature"):
-        lines.append(f"\nSignature:")
-        lines.append(f"  {info['signature']}")
+        lines.append(f"\nSignature: {info['signature']}")
 
     if info.get("parameters"):
         lines.append(f"\nParameters:")
         for p in info["parameters"]:
             type_ref = f" -> {p['type_path']}" if p.get("type_path") else ""
-            lines.append(f"  {p['name']}: {p['type_name']}{type_ref}")
-            if p.get("description"):
-                lines.append(f"    {p['description']}")
+            desc = f" — {p['description']}" if p.get("description") else ""
+            lines.append(f"  {p['name']}: {p['type_name']}{type_ref}{desc}")
 
     if info.get("return_type"):
         rt = info["return_type"]
-        lines.append(f"\nReturn/Value Type:")
-        lines.append(f"  {rt['name']}")
-        if rt.get("path"):
-            lines.append(f"  -> {rt['path']}")
+        path_ref = f" -> {rt['path']}" if rt.get("path") else ""
+        lines.append(f"\nReturns: {rt['name']}{path_ref}")
 
     if info.get("enum_members"):
         lines.append(f"\nEnum Members:")
@@ -301,7 +294,7 @@ def _format_inspect(info: dict) -> str:
     if info.get("properties"):
         lines.append(f"\nProperties:")
         for p in info["properties"][:15]:
-            lines.append(f"  {p['name']}: {p.get('description', '')[:60]}")
+            lines.append(f"  {p['name']}: {p.get('description', '')}")
             lines.append(f"    -> {p['path']}")
 
     if info.get("references"):
@@ -310,8 +303,7 @@ def _format_inspect(info: dict) -> str:
         for r in info["references"]:
             if r["title"] not in seen:
                 seen.add(r["title"])
-                ref_lines.append(f"  [{r['category']}] {r['title']}")
-                ref_lines.append(f"    -> {r['path']}")
+                ref_lines.append(f"  [{r['category']}] {r['title']} -> {r['path']}")
         if ref_lines:
             lines.append(f"\nReferenced Types ({len(seen)}):")
             lines.extend(ref_lines)
@@ -319,25 +311,33 @@ def _format_inspect(info: dict) -> str:
     # SIMPL Windows signal data
     if info.get("signals"):
         lines.append(f"\nSignals:")
-        lines.append("-" * 40)
         _append_signal_lines(lines, info["signals"])
 
     if info.get("slots"):
         lines.append(f"\nProgramming Slots:")
         for s in info["slots"]:
-            lines.append(f"  Slot {s['slot_number']:02d}: {s['name']}")
-            if s.get('href'):
-                lines.append(f"    -> {s['href']}")
+            href = f" -> {s['href']}" if s.get('href') else ""
+            lines.append(f"  Slot {s['slot_number']:02d}: {s['name']}{href}")
 
     if info.get("has_example"):
-        lines.append(f"\n*** This document has a CODE EXAMPLE ***")
-        lines.append(f'    Use the get_example tool with "{info["title"]}"')
+        lines.append(f"\nHas code example — use get_example(\"{info['title']}\")")
 
     return "\n".join(lines)
 
 
+_TYPE_SHORT = {
+    'digital_input': 'D-In',
+    'digital_output': 'D-Out',
+    'analog_input': 'A-In',
+    'analog_output': 'A-Out',
+    'serial_input': 'S-In',
+    'serial_output': 'S-Out',
+    'parameter': 'Param',
+}
+
+
 def _append_signal_lines(lines: list, signals: list):
-    """Append formatted signal lines grouped by type."""
+    """Append formatted signal lines grouped by type. Full descriptions."""
     type_labels = {
         'digital_input': 'Digital Inputs',
         'digital_output': 'Digital Outputs',
@@ -361,11 +361,7 @@ def _append_signal_lines(lines: list, signals: list):
         for s in sigs:
             name = s.get('name') or s.get('signal_name', '?')
             desc = s.get('description', '')
-            if len(desc) > 80:
-                desc = desc[:77] + '...'
-            lines.append(f"    {name}")
-            if desc:
-                lines.append(f"      {desc}")
+            lines.append(f"    {name}: {desc}" if desc else f"    {name}")
 
 
 def _format_signal_search(results: list, query: str) -> str:
@@ -373,14 +369,12 @@ def _format_signal_search(results: list, query: str) -> str:
         return f"No signals found for '{query}'"
     lines = [f"Found {len(results)} signals for '{query}':\n"]
     for i, r in enumerate(results, 1):
-        lines.append(f"{i}. [{r['signal_type']}] {r['signal_name']}")
-        lines.append(f"   Document: {r['document_title']}")
-        lines.append(f"   Path: {r['path']}")
+        st = _TYPE_SHORT.get(r['signal_type'], r['signal_type'])
+        lines.append(f"{i}. {r['signal_name']} [{st}] — {r['document_title']}")
         desc = r.get('description', '')
         if desc:
-            if len(desc) > 100:
-                desc = desc[:97] + '...'
             lines.append(f"   {desc}")
+        lines.append(f"   Path: {r['path']}")
         lines.append("")
     return "\n".join(lines)
 
@@ -389,29 +383,21 @@ def _format_device_signals(info: dict) -> str:
     if not info:
         return "Device not found"
     lines = []
-    lines.append(f"{'=' * 70}")
-    lines.append(f"Device: {info['title']}")
+    lines.append(f"{info['title']}")
     if info.get('namespace'):
-        cat = info['namespace'].replace('|', ' > ')
-        lines.append(f"Category: {cat}")
-    lines.append(f"Path: {info['path']}")
+        lines.append(f"Category: {info['namespace'].replace('|', ' > ')}")
     if info.get('description'):
-        lines.append(f"\n{info['description']}")
-    lines.append(f"{'=' * 70}")
+        lines.append(info['description'])
 
     if info.get('signals'):
-        lines.append(f"\nDevice-level Signals:")
-        lines.append("-" * 40)
         _append_signal_lines(lines, info['signals'])
 
     for slot in info.get('slots', []):
-        lines.append(f"\n{'─' * 40}")
-        lines.append(f"Slot {slot['slot_number']:02d}: {slot['slot_name']}")
-        lines.append(f"  Path: {slot['slot_path']}")
+        lines.append(f"\nSlot {slot['slot_number']:02d}: {slot['slot_name']}")
         if slot.get('signals'):
             _append_signal_lines(lines, slot['signals'])
         else:
-            lines.append("  (no signals defined)")
+            lines.append("  (no signals)")
 
     return "\n".join(lines)
 
@@ -565,45 +551,37 @@ _SIGNAL_TYPE_MAP = {
 
 def _format_cross_reference(device_info: dict, spro_class: dict | None) -> str:
     lines = []
-    lines.append(f"{'=' * 70}")
-    lines.append(f"Cross-Reference: {device_info['title']}")
-    lines.append(f"SIMPL Windows -> SIMPL# Pro")
-    lines.append(f"{'=' * 70}")
-
+    lines.append(f"{device_info['title']}")
     if spro_class:
-        lines.append(f"\nSIMPL# Pro Class: {spro_class['title']}")
-        lines.append(f"  Namespace: {spro_class.get('namespace', 'N/A')}")
+        lines.append(f"S#Pro: {spro_class['title']} ({spro_class.get('namespace', '')})")
         lines.append(f"  Path: {spro_class['path']}")
     else:
-        lines.append(f"\nNo matching SIMPL# Pro class found.")
-        lines.append(f"(Tried searching for device name variants)")
+        lines.append(f"S#Pro: no matching class found")
 
-    lines.append(f"\nSignal Type Mapping:")
-    lines.append(f"  {'SIMPL Windows':<25} {'SIMPL# Pro':<25}")
-    lines.append(f"  {'─' * 25} {'─' * 25}")
-    lines.append(f"  Digital input/output     BooleanInput/BooleanOutput")
-    lines.append(f"  Analog input/output      UShortInput/UShortOutput")
-    lines.append(f"  Serial input/output      StringInput/StringOutput")
-    lines.append(f"  Parameter                (compile-time config)")
-
-    # List device signals with their S#Pro equivalents
+    # List signals with S#Pro type, grouped by slot
     all_signals = list(device_info.get('signals', []))
     for slot in device_info.get('slots', []):
-        all_signals.extend(slot.get('signals', []))
+        sigs = slot.get('signals', [])
+        if sigs:
+            lines.append(f"\nSlot {slot['slot_number']:02d}: {slot['slot_name']}")
+            for s in sigs:
+                name = s.get('name') or s.get('signal_name', '?')
+                st = s.get('type') or s.get('signal_type', '?')
+                spro_t = _SIGNAL_TYPE_MAP.get(st, ('N/A', ''))[0]
+                short = _TYPE_SHORT.get(st, st)
+                desc = s.get('description', '')
+                lines.append(f"  {name} [{short} -> {spro_t}]: {desc}" if desc
+                             else f"  {name} [{short} -> {spro_t}]")
 
-    if all_signals:
-        lines.append(f"\nDevice Signals ({len(all_signals)}):")
-        lines.append(f"  {'Signal':<30} {'SIMPL Type':<18} {'S#Pro Type'}")
-        lines.append(f"  {'─' * 30} {'─' * 18} {'─' * 20}")
-        for s in all_signals[:50]:  # cap at 50 for readability
+    if all_signals and not device_info.get('slots'):
+        for s in all_signals:
             name = s.get('name') or s.get('signal_name', '?')
             st = s.get('type') or s.get('signal_type', '?')
-            spro = _SIGNAL_TYPE_MAP.get(st, ('N/A', ''))[0]
-            if len(name) > 28:
-                name = name[:25] + '...'
-            lines.append(f"  {name:<30} {st:<18} {spro}")
-        if len(all_signals) > 50:
-            lines.append(f"  ... and {len(all_signals) - 50} more signals")
+            spro_t = _SIGNAL_TYPE_MAP.get(st, ('N/A', ''))[0]
+            short = _TYPE_SHORT.get(st, st)
+            desc = s.get('description', '')
+            lines.append(f"  {name} [{short} -> {spro_t}]: {desc}" if desc
+                         else f"  {name} [{short} -> {spro_t}]")
 
     return "\n".join(lines)
 
@@ -926,17 +904,19 @@ def get_device_signals(device_name: str) -> str:
 def cross_reference(device_name: str) -> str:
     """Cross-reference a SIMPL Windows device with its SIMPL# Pro equivalent.
 
-    Shows how SIMPL Windows signal types map to S# Pro property types:
-    - Digital input/output -> BooleanInput/BooleanOutput (BoolInput/BoolOutput)
-    - Analog input/output -> UShortInput/UShortOutput
-    - Serial input/output -> StringInput/StringOutput
-    - Parameter -> compile-time configuration (no S#Pro equivalent)
+    Accepts either a SIMPL Windows device name (CLW-DIMFLVEX-P) or an S#Pro
+    class name (ClwDimFlvExP). Shows all signals with their S#Pro type mappings
+    and full descriptions.
 
     Args:
-        device_name: SIMPL Windows device name (e.g. "CLW-DIMFLVEX-P")
+        device_name: Device name in either SIMPL or S#Pro format
     """
     simpl = _get_searcher('simpl')
+
+    # Try direct SIMPL lookup first, then fuzzy via _find_simpl_device
     device_info = simpl.get_device_signals(device_name)
+    if not device_info:
+        device_info = _find_simpl_device(simpl, device_name)
     if not device_info:
         return f"Device not found in SIMPL Windows: {device_name}"
 
@@ -944,8 +924,6 @@ def cross_reference(device_name: str) -> str:
     spro_class = None
     try:
         spro = _get_searcher('spro')
-        # Build PascalCase class name from hyphenated device name
-        # CLW-DIMFLVEX-P -> ClwDimflvexP, then also try title-cased segments
         candidates = _device_name_to_spro_candidates(device_name)
         for attempt in candidates:
             result = spro.find_type(attempt)
@@ -953,7 +931,7 @@ def cross_reference(device_name: str) -> str:
                 spro_class = result
                 break
     except (RuntimeError, FileNotFoundError):
-        pass  # S#Pro CHM not available
+        pass
 
     return _format_cross_reference(device_info, spro_class)
 
@@ -963,14 +941,17 @@ def cross_reference_member(class_name: str, member_name: str) -> str:
     """Traverse from an S#Pro class member to its SIMPL Windows signal equivalent.
 
     Given a class and property/method name, resolves the S#Pro member, finds the
-    matching SIMPL Windows device and slot, and maps individual signals between
-    the two systems. Handles naming differences like S#Pro 'LevelIn' matching
+    matching SIMPL Windows device and slot, and maps individual signals with full
+    descriptions. Handles naming differences like S#Pro 'LevelIn' matching
     SIMPL 'Level_In', and 'ParameterRemoteHoldTime' matching 'RemoteHoldTime'.
+
+    If the member isn't found directly on the class, traverses sub-object
+    collections (DimmingLoads, SwitchedLoads, etc.) to find it on load types.
 
     Args:
         class_name: S#Pro class name (e.g. "ClwDimFlvExP")
         member_name: Property or method name (e.g. "DimmerRemoteButtonSettings",
-                     "DimmingLoads", "LevelIn")
+                     "DimmingLoads", "LevelIn", "Level")
     """
     try:
         spro = _get_searcher('spro')
@@ -988,13 +969,12 @@ def cross_reference_member(class_name: str, member_name: str) -> str:
     if not class_info:
         return f"S#Pro class not found: {class_name}"
 
-    lines.append(f"{'=' * 70}")
-    lines.append(f"Cross-Reference Member: {class_info['title']}.{member_name}")
-    lines.append(f"{'=' * 70}")
+    lines.append(f"{class_info['title']}.{member_name}")
 
     # 2. Find the member - check properties and references
     member_doc = None
     member_type_class = None
+    found_via_sub_object = None
 
     # Try direct property lookup
     search_name = f"{class_name}.{member_name}"
@@ -1008,11 +988,50 @@ def cross_reference_member(class_name: str, member_name: str) -> str:
                 member_doc = spro.inspect(r['path'])
                 break
 
+    # Issue #1: If still not found, traverse sub-object collections
+    # (DimmingLoads, SwitchedLoads, etc.) to find it on load types
+    if not member_doc:
+        _SUB_COLLECTIONS = [
+            'DimmingLoads', 'SwitchedLoads', 'DinLoads',
+            'DinDimmableLoad', 'Feedbacks', 'Button',
+        ]
+        for col_name in _SUB_COLLECTIONS:
+            col_doc = spro.inspect(f"{class_name}.{col_name}")
+            if col_doc and col_doc.get('return_type') and col_doc['return_type'].get('path'):
+                # Resolve the collection element type
+                col_type = spro.inspect(col_doc['return_type']['path'])
+                if not col_type:
+                    continue
+                # Check referenced types for the member
+                for ref in col_type.get('references', []):
+                    if member_name.lower() in ref['title'].lower():
+                        member_doc = spro.inspect(ref['path'])
+                        if member_doc:
+                            found_via_sub_object = f"{class_name}.{col_name}[n].{member_name}"
+                            break
+                if member_doc:
+                    break
+                # Also try the element type's own class hierarchy
+                for ref in col_type.get('references', []):
+                    if ref.get('category') == 'class':
+                        base_class = spro.inspect(ref['path'])
+                        if base_class:
+                            for bref in base_class.get('references', []):
+                                if member_name.lower() in bref['title'].lower():
+                                    member_doc = spro.inspect(bref['path'])
+                                    if member_doc:
+                                        base_name = base_class['title'].replace(' Class', '')
+                                        found_via_sub_object = f"{class_name}.{col_name}[n] ({base_name}).{member_name}"
+                                        break
+                        if member_doc:
+                            break
+
     if member_doc:
-        lines.append(f"\nS#Pro Member: {member_doc['title']}")
-        lines.append(f"  Path: {member_doc['path']}")
+        if found_via_sub_object:
+            lines.append(f"  Found via: {found_via_sub_object}")
+        lines.append(f"S#Pro: {member_doc['title']}")
         if member_doc.get('description'):
-            lines.append(f"  Description: {member_doc['description']}")
+            lines.append(f"  {member_doc['description']}")
 
         # If the member has a return/value type, resolve it
         if member_doc.get('return_type'):
@@ -1021,35 +1040,21 @@ def cross_reference_member(class_name: str, member_name: str) -> str:
             if rt.get('path'):
                 member_type_class = spro.inspect(rt['path'])
     else:
-        lines.append(f"\nS#Pro member '{member_name}' not found on {class_name}")
-        lines.append(f"Attempting fuzzy match...")
+        lines.append(f"S#Pro member '{member_name}' not found on {class_name} or its sub-objects")
 
     # 3. Find the SIMPL Windows device
-    device_candidates = _device_name_to_spro_candidates(class_name)
-    # Reverse: try to go from S#Pro name back to device name
-    # ClwDimFlvExP → insert hyphens at case boundaries → CLW-DIM-FLV-EX-P
-    spaced = _re.sub(r'([a-z])([A-Z])', r'\1-\2', class_name)
-    spaced = _re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1-\2', spaced)
-    device_candidates.insert(0, spaced.upper())
-
-    device_info = None
-    for candidate in device_candidates:
-        device_info = simpl.get_device_signals(candidate)
-        if device_info:
-            break
+    device_info = _find_simpl_device(simpl, class_name)
 
     if not device_info:
-        lines.append(f"\nSIMPL Windows device not found for: {class_name}")
+        lines.append(f"SIMPL Windows device not found for: {class_name}")
         return "\n".join(lines)
 
-    lines.append(f"\nSIMPL Windows Device: {device_info['title']}")
+    lines.append(f"SIMPL: {device_info['title']}")
 
     # 4. Collect all SIMPL signals (device-level + all slots)
     all_simpl_signals = list(device_info.get('signals', []))
-    slot_signals: dict[str, list] = {}
     for slot in device_info.get('slots', []):
         sigs = slot.get('signals', [])
-        slot_signals[slot['slot_name']] = sigs
         all_simpl_signals.extend(sigs)
 
     # 5. If we resolved a type class (e.g. DimmerRemoteButtonSettings), match its
@@ -1058,8 +1063,6 @@ def cross_reference_member(class_name: str, member_name: str) -> str:
         slot_hint = _slot_name_from_spro_class(
             member_type_class['title'], class_name
         )
-        lines.append(f"\nS#Pro Settings Class: {member_type_class['title']}")
-        lines.append(f"  Slot name hint: \"{slot_hint}\"")
 
         # Find matching SIMPL slot
         matched_slot = None
@@ -1071,49 +1074,123 @@ def cross_reference_member(class_name: str, member_name: str) -> str:
                 break
 
         if matched_slot:
-            lines.append(f"  Matched SIMPL Slot: Slot {matched_slot['slot_number']:02d}: {matched_slot['slot_name']}")
-            lines.append(f"\n  {'S#Pro Property':<45} {'SIMPL Signal':<35} {'Description'}")
-            lines.append(f"  {'─' * 45} {'─' * 35} {'─' * 40}")
+            lines.append(f"\nSlot {matched_slot['slot_number']:02d}: {matched_slot['slot_name']}")
 
             slot_sigs = matched_slot.get('signals', [])
             spro_props = member_type_class.get('properties', [])
 
             for prop in spro_props:
-                prop_name = prop['name'].split('.')[-1]  # Remove class prefix
+                prop_name = prop['name'].split('.')[-1]
                 if prop_name.endswith(' Property') or prop_name.endswith(' Method'):
-                    continue  # Skip the overview entries
+                    continue
                 match = _match_spro_member_to_simpl_signal(prop_name, slot_sigs)
                 if match:
                     sig_name = match.get('name') or match.get('signal_name', '?')
                     desc = match.get('description', '')
-                    if len(desc) > 40:
-                        desc = desc[:37] + '...'
-                    lines.append(f"  {prop_name:<45} {sig_name:<35} {desc}")
+                    st = match.get('type') or match.get('signal_type', '?')
+                    short = _TYPE_SHORT.get(st, st)
+                    lines.append(f"  {prop_name} -> {sig_name} [{short}]: {desc}")
                 else:
-                    lines.append(f"  {prop_name:<45} {'(no match)':<35}")
+                    lines.append(f"  {prop_name} -> (no SIMPL match)")
         else:
-            lines.append(f"  No matching SIMPL slot found for \"{slot_hint}\"")
+            lines.append(f"No matching SIMPL slot found for \"{slot_hint}\"")
 
     # 6. If it's a direct signal property (like LevelIn), find it in SIMPL
     elif not member_type_class:
-        lines.append(f"\n  Searching SIMPL signals for '{member_name}'...")
         match = _match_spro_member_to_simpl_signal(member_name, all_simpl_signals)
         if match:
             sig_name = match.get('name') or match.get('signal_name', '?')
             sig_type = match.get('type') or match.get('signal_type', '?')
             desc = match.get('description', '')
             spro_t = _SIGNAL_TYPE_MAP.get(sig_type, ('?', '?'))
+            short = _TYPE_SHORT.get(sig_type, sig_type)
 
-            lines.append(f"\n  Match found:")
-            lines.append(f"  S#Pro: {member_name}")
-            lines.append(f"  SIMPL: {sig_name} ({sig_type})")
-            lines.append(f"  S#Pro Type: {spro_t[0]}")
+            lines.append(f"\n{member_name} -> {sig_name} [{short} -> {spro_t[0]}]")
             if desc:
-                lines.append(f"  Description: {desc}")
+                lines.append(f"  {desc}")
         else:
-            lines.append(f"  No matching SIMPL signal found for '{member_name}'")
+            lines.append(f"No matching SIMPL signal found for '{member_name}'")
 
     return "\n".join(lines)
+
+
+def _find_simpl_device(simpl, class_name: str):
+    """Find a SIMPL Windows device from an S#Pro class name.
+
+    Tries multiple name transformations including merging adjacent segments,
+    and falls back to content search for multi-product pages.
+    """
+    candidates = []
+
+    # Split S#Pro PascalCase into segments at case boundaries
+    # ClwDimuEx → ['Clw', 'Dimu', 'Ex']
+    # Also split digits from letters: Ry204 → ['Ry', '204']
+    raw_segments = _re.findall(r'[A-Z][a-z0-9]*|[0-9]+', class_name)
+    segments = []
+    for seg in raw_segments:
+        # Split letter-digit boundaries within a segment
+        parts = _re.findall(r'[A-Za-z]+|[0-9]+', seg)
+        segments.extend(parts)
+    if segments:
+        # If last segment is a single char (e.g. P), treat it as a suffix
+        # ClwDimFlvExP → body=['Clw','Dim','Flv','Ex'] suffix='P'
+        suffix_seg = ''
+        body = segments
+        if len(segments) > 2 and len(segments[-1]) == 1:
+            suffix_seg = segments[-1].upper()
+            body = segments[:-1]
+
+        sfx = f'-{suffix_seg}' if suffix_seg else ''
+
+        # Full hyphenated: CLW-DIM-FLV-EX-P
+        candidates.append('-'.join(s.upper() for s in body) + sfx)
+        # Merge all body segments after first: CLW-DIMFLVEX-P
+        if len(body) > 2:
+            candidates.append(body[0].upper() + '-' + ''.join(s.upper() for s in body[1:]) + sfx)
+        # Progressive merges from different split points
+        for merge_start in range(len(body) - 1, 0, -1):
+            prefix = '-'.join(s.upper() for s in body[:merge_start])
+            merged = ''.join(s.upper() for s in body[merge_start:])
+            candidates.append(f"{prefix}-{merged}{sfx}")
+        # No suffix variant (some devices don't have -P)
+        if suffix_seg:
+            candidates.append('-'.join(s.upper() for s in body))
+            if len(body) > 2:
+                candidates.append(body[0].upper() + '-' + ''.join(s.upper() for s in body[1:]))
+
+    # Plain concatenation
+    candidates.append(class_name.upper().replace('-', '').replace('_', ''))
+    candidates.append(class_name)
+
+    # Add -P suffix variants (common for infiNET EX devices)
+    for cand in list(candidates):
+        if not cand.endswith('-P') and not cand.endswith('P'):
+            candidates.append(cand + '-P')
+
+    # Deduplicate
+    seen = set()
+    unique = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+
+    for candidate in unique:
+        result = simpl.get_device_signals(candidate)
+        if result:
+            return result
+
+    # Fallback: full-text search for the device name
+    # This handles multi-product pages like "CLX Dimming Modules"
+    stripped = class_name.replace('-', '').replace('_', '')
+    results = simpl.search(stripped, 5)
+    if results:
+        for r in results:
+            result = simpl.get_device_signals(r['title'])
+            if result and (result.get('signals') or result.get('slots')):
+                return result
+
+    return None
 
 
 # ---------------------------------------------------------------------------

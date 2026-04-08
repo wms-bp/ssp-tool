@@ -1745,11 +1745,7 @@ def _print_signals(signals: list):
         for s in sigs:
             name = s.get('name') or s.get('signal_name', '?')
             desc = s.get('description', '')
-            if len(desc) > 80:
-                desc = desc[:77] + '...'
-            print(f"    {name}")
-            if desc:
-                print(f"      {desc}")
+            print(f"    {name}: {desc}" if desc else f"    {name}")
 
 
 def main(argv=None):
