@@ -384,6 +384,43 @@ def _format_device_signals(info: dict) -> str:
     return "\n".join(lines)
 
 
+def _device_name_to_spro_candidates(device_name: str) -> list[str]:
+    """Generate S#Pro class name candidates from a SIMPL Windows device name.
+
+    Crestron convention: CLW-DIMFLVEX-P -> ClwDimFlvExP (PascalCase per segment).
+    We generate several variants since the casing isn't always predictable.
+    """
+    # Normalize: strip whitespace, work with uppercase segments
+    name = device_name.strip()
+    parts = [p for p in name.replace('_', '-').split('-') if p]
+
+    candidates = []
+
+    # 1. Exact concatenation with each part title-cased: ClwDimflvexP
+    candidates.append(''.join(p.capitalize() for p in parts))
+
+    # 2. All parts lowered then capitalized first char: same as above typically
+    # 3. Try stripping trailing numeric-only parts (e.g. "204" in CEN-IO-RY-204)
+    alpha_parts = [p for p in parts if not p.isdigit()]
+    if alpha_parts != parts:
+        candidates.append(''.join(p.capitalize() for p in alpha_parts))
+
+    # 4. Keep original casing but just remove hyphens
+    candidates.append(name.replace('-', '').replace('_', ''))
+
+    # 5. Try the raw name (might match as a partial search)
+    candidates.append(name)
+
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            result.append(c)
+    return result
+
+
 _SIGNAL_TYPE_MAP = {
     'digital_input': ('BooleanInput', 'BoolInput'),
     'digital_output': ('BooleanOutput', 'BoolOutput'),
@@ -775,9 +812,10 @@ def cross_reference(device_name: str) -> str:
     spro_class = None
     try:
         spro = _get_searcher('spro')
-        # Try various name transformations
-        clean_name = device_name.replace('-', '').replace('_', '')
-        for attempt in [device_name, clean_name, device_name.replace('-', '')]:
+        # Build PascalCase class name from hyphenated device name
+        # CLW-DIMFLVEX-P -> ClwDimflvexP, then also try title-cased segments
+        candidates = _device_name_to_spro_candidates(device_name)
+        for attempt in candidates:
             result = spro.find_type(attempt)
             if result:
                 spro_class = result
