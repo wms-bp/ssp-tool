@@ -167,11 +167,43 @@ if sys.stderr is None:
 
 mcp = FastMCP("chm-docs", instructions=(
     "Crestron SIMPL# Pro SDK and SIMPL Windows documentation search. "
-    "Tools that accept a 'chm' parameter default to 'spro' (SIMPL# Pro). "
-    "Pass chm='simpl' to search SIMPL Windows device documentation. "
-    "Use search/search_title to find types, inspect for details, "
-    "get_class_info for member listings, api_chain for event flows. "
-    "Use search_signals and get_device_signals for SIMPL Windows signal I/O."
+    "Two CHM sources are available: 'spro' (SIMPL# Pro C# SDK) and 'simpl' (SIMPL Windows device library). "
+    "Tools that accept a 'chm' parameter default to 'spro'. Pass chm='simpl' for SIMPL Windows.\n\n"
+
+    "SIMPL# Pro tools (chm='spro'):\n"
+    "  - search/search_title: find classes, methods, properties, events by keyword or name\n"
+    "  - inspect: detailed view of any type — signature, parameters, return type, references\n"
+    "  - get_class_info: list all members of a class grouped by category\n"
+    "  - api_chain: trace event wiring — class → event → delegate → eventargs → properties\n"
+    "  - get_example: retrieve C# code examples\n\n"
+
+    "SIMPL Windows tools (chm='simpl'):\n"
+    "  - search/search_title with chm='simpl': find devices, cards, slots by name\n"
+    "  - inspect with chm='simpl': view device signal tables and programming slot structure\n"
+    "  - search_signals: search signal definitions by name or description, optionally filtered by type\n"
+    "  - get_device_signals: get all signals for a device grouped by slot with descriptions\n\n"
+
+    "Cross-referencing between SIMPL Windows and S#Pro:\n"
+    "  - cross_reference: given a SIMPL Windows device name, find the matching S#Pro class "
+    "and show how all signals map to S#Pro types\n"
+    "  - cross_reference_member: given an S#Pro class and member name, traverse to the "
+    "matching SIMPL Windows slot and map individual signals with descriptions. "
+    "Use this to get SIMPL signal descriptions that are missing from the S#Pro docs.\n\n"
+
+    "Signal type mapping (SIMPL Windows → S#Pro):\n"
+    "  Digital input/output  → BooleanInput/BooleanOutput (BoolInput/BoolOutput)\n"
+    "  Analog input/output   → UShortInput/UShortOutput\n"
+    "  Serial input/output   → StringInput/StringOutput\n"
+    "  Parameter             → compile-time config (no runtime S#Pro equivalent)\n\n"
+
+    "Device naming: SIMPL Windows uses hyphenated names (CLW-DIMFLVEX-P) while S#Pro uses "
+    "PascalCase (ClwDimFlvExP). The cross-reference tools handle this translation automatically.\n\n"
+
+    "Typical cross-reference workflow:\n"
+    "  1. Find the S#Pro class: inspect('ClwDimFlvExP')\n"
+    "  2. Get SIMPL signal descriptions: cross_reference_member('ClwDimFlvExP', 'DimmerRemoteButtonSettings')\n"
+    "  3. Or start from SIMPL: get_device_signals('CLW-DIMFLVEX-P') then cross_reference('CLW-DIMFLVEX-P')\n"
+    "  4. For individual signals: cross_reference_member('ClwDimFlvExP', 'LevelIn') → finds Level_In with description"
 ))
 mcp._mcp_server.version = __version__
 
