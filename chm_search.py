@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from html.parser import HTMLParser
 from typing import Optional
+from urllib.parse import unquote
 import sqlite3
 import hashlib
 
@@ -272,6 +273,164 @@ def get_type_category(help_id: str, title: str = '') -> str:
     return 'unknown'
 
 
+# ---------------------------------------------------------------------------
+# SIMPL Windows extraction helpers
+# ---------------------------------------------------------------------------
+
+def detect_chm_type(extract_dir: Path) -> str:
+    """Detect whether an extracted CHM is SIMPLSharpPro or SIMPL_Windows."""
+    if (extract_dir / 'html').is_dir():
+        return 'simplsharp_pro'
+    if (extract_dir / 'Device_Library').is_dir():
+        return 'simpl_windows'
+    return 'unknown'
+
+
+def extract_toc_path(html_content: str) -> str:
+    """Extract MadCap:tocPath from the <html> tag."""
+    match = re.search(r'MadCap:tocPath="([^"]*)"', html_content)
+    if match:
+        return html.unescape(match.group(1))
+    return ''
+
+
+def extract_signals_from_table(html_content: str) -> list:
+    """Extract signal definitions from SIMPL Windows signal tables.
+
+    Parses two-column tables whose header contains 'signal' (case-insensitive).
+    Returns a list of dicts with keys: name, signal_type, description.
+    """
+    signals = []
+
+    # Split into tables
+    table_blocks = re.findall(r'<table[^>]*>(.*?)</table>', html_content, re.DOTALL | re.IGNORECASE)
+    for table_html in table_blocks:
+        # Check if this table has a signal header (tolerating newlines/whitespace)
+        header_text = ''
+        first_row = re.search(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL | re.IGNORECASE)
+        if first_row:
+            header_text = html_to_text(first_row.group(1)).lower()
+        if 'signal' not in header_text:
+            continue
+
+        # Extract data rows (skip the header row)
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL | re.IGNORECASE)
+        for row in rows[1:]:  # skip header
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
+            if len(cells) < 2:
+                continue
+
+            sig_cell_html = cells[0]
+            desc_cell_html = cells[1]
+
+            sig_cell_text = html_to_text(sig_cell_html).strip()
+            description = html_to_text(desc_cell_html).strip()
+
+            parsed = _parse_signal_cell(sig_cell_text, sig_cell_html)
+            for sig in parsed:
+                sig['description'] = description
+                signals.append(sig)
+
+    return signals
+
+
+# Regex for matching signal type/direction prefix
+_SIG_TYPE_RE = re.compile(
+    r'(Digital|Analog|Serial)\s+(input|output)s?\s*:', re.IGNORECASE
+)
+_PARAM_TYPE_RE = re.compile(r'Parameter\s*:', re.IGNORECASE)
+
+
+def _parse_signal_cell(text: str, html_content: str) -> list:
+    """Parse a single signal-name-and-type table cell.
+
+    Returns a list of signal dicts (one cell can list multiple signals).
+    Each dict has keys: name, signal_type (no description yet).
+    """
+    results = []
+
+    # Determine signal type from the text prefix
+    sig_match = _SIG_TYPE_RE.search(text)
+    param_match = _PARAM_TYPE_RE.search(text)
+
+    if sig_match:
+        data_type = sig_match.group(1).lower()       # digital/analog/serial
+        direction = sig_match.group(2).lower()        # input/output
+        signal_type = f'{data_type}_{direction}'
+    elif param_match:
+        signal_type = 'parameter'
+    else:
+        return results
+
+    # Extract signal names from angle brackets or bold tags in the HTML
+    # Try bold spans first (more reliable)
+    names = []
+    bold_pattern = re.compile(
+        r'<(?:span|b)[^>]*font-weight:\s*bold[^>]*>([^<]+)</(?:span|b)>'
+        r'|<b[^>]*>([^<]+)</b>'
+        r'|<b\s+class="[^"]*join[^"]*">([^<]+)</b>',
+        re.IGNORECASE
+    )
+    for m in bold_pattern.finditer(html_content):
+        name = (m.group(1) or m.group(2) or m.group(3) or '').strip()
+        if name and name.lower() not in ('signal name and type', 'signal', 'description'):
+            names.append(name)
+
+    # Fallback: extract from plain text angle brackets  <Name>
+    if not names:
+        for m in re.finditer(r'<([A-Za-z0-9_$#\-\s]+)>', text):
+            n = m.group(1).strip()
+            if n and n.lower() not in ('signal name and type', 'signal', 'description'):
+                names.append(n)
+
+    # Handle "through" ranges: keep both endpoints as a single entry
+    # e.g. ['Recall_Pre_1', 'Recall_Pre_3'] from "Recall_Pre_1> through <Recall_Pre_3"
+    if not names:
+        # No names found — store with the raw text as name
+        results.append({'name': text.strip(), 'signal_type': signal_type})
+    else:
+        # Check for range pattern in text
+        range_match = re.search(
+            r'<[^>]*?([A-Za-z_]+[\-_]?\d+)[^>]*>.*?through.*?<[^>]*?([A-Za-z_]+[\-_]?\d+)[^>]*>',
+            text, re.IGNORECASE
+        )
+        if range_match and len(names) == 2:
+            results.append({
+                'name': f'{names[0]} through {names[1]}',
+                'signal_type': signal_type
+            })
+        else:
+            for name in names:
+                results.append({'name': name, 'signal_type': signal_type})
+
+    return results
+
+
+def extract_slot_links(html_content: str) -> list:
+    """Extract slot references from device overview pages.
+
+    Matches patterns like:
+      Slot 01: <a href="...">Dimmer Controls</a>
+      Slot-01: <a href="...">Dimmer Controls</a>
+    """
+    slots = []
+    # Match "Slot XX:" or "Slot-XX:" followed by a link (possibly with URL-encoded spaces)
+    pattern = re.compile(
+        r'Slot[\s\-_]+(\d+)\s*:\s*<a\s+href="([^"]+)"[^>]*>([^<]+)</a>',
+        re.IGNORECASE
+    )
+    for m in pattern.finditer(html_content):
+        name = html.unescape(m.group(3).strip())
+        # Clean up whitespace/newlines in names
+        name = re.sub(r'\s+', ' ', name).strip()
+        slots.append({
+            'slot_number': int(m.group(1)),
+            'href': html.unescape(m.group(2)),
+            'name': name
+        })
+    return slots
+
+
 class CHMSearch:
     """Main CHM search functionality."""
 
@@ -345,7 +504,7 @@ class CHMSearch:
         conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
 
-        # Create tables
+        # --- common schema ---
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS documents (
                 id INTEGER PRIMARY KEY,
@@ -360,7 +519,6 @@ class CHMSearch:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_title ON documents(title)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_namespace ON documents(namespace)')
 
-        # Create FTS table
         cursor.execute('''
             CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
                 title, namespace, keywords, content,
@@ -369,16 +527,77 @@ class CHMSearch:
             )
         ''')
 
+        # --- SIMPL Windows signal / slot tables (empty for S#Pro) ---
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY,
+                document_id INTEGER REFERENCES documents(id),
+                signal_name TEXT NOT NULL,
+                signal_type TEXT NOT NULL,
+                description TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_name ON signals(signal_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(signal_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_doc ON signals(document_id)')
+
+        cursor.execute('''
+            CREATE VIRTUAL TABLE IF NOT EXISTS signals_fts USING fts5(
+                signal_name, description,
+                content='signals',
+                content_rowid='id'
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS device_slots (
+                id INTEGER PRIMARY KEY,
+                parent_document_id INTEGER REFERENCES documents(id),
+                slot_number INTEGER,
+                slot_name TEXT,
+                slot_path TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_slots_parent ON device_slots(parent_document_id)')
+
         # Clear existing data
         cursor.execute('DELETE FROM documents')
         cursor.execute('DELETE FROM documents_fts')
+        cursor.execute('DELETE FROM signals')
+        cursor.execute('DELETE FROM signals_fts')
+        cursor.execute('DELETE FROM device_slots')
 
-        # Process HTML files
+        # Dispatch by CHM type
+        chm_type = detect_chm_type(self.extract_dir)
+        self.chm_type = chm_type
+
+        if chm_type == 'simpl_windows':
+            total = self._build_index_simpl_windows(cursor)
+        else:
+            total = self._build_index_spro(cursor)
+
+        # Populate document FTS
+        cursor.execute('''
+            INSERT INTO documents_fts(rowid, title, namespace, keywords, content)
+            SELECT id, title, namespace, keywords, content FROM documents
+        ''')
+
+        # Populate signal FTS (may be empty for S#Pro)
+        cursor.execute('''
+            INSERT INTO signals_fts(rowid, signal_name, description)
+            SELECT id, signal_name, description FROM signals
+        ''')
+
+        conn.commit()
+        conn.close()
+        print(f"Index built with {total} documents.", file=sys.stderr)
+
+    def _build_index_spro(self, cursor) -> int:
+        """Index SIMPLSharpPro CHM (flat html/ directory with GUID files)."""
         html_dir = self.extract_dir / 'html'
         if not html_dir.exists():
             print("Warning: No html directory found in extracted CHM", file=sys.stderr)
-            conn.close()
-            return
+            return 0
 
         htm_files = list(html_dir.glob('*.htm')) + list(html_dir.glob('*.html'))
         total = len(htm_files)
@@ -408,15 +627,80 @@ class CHMSearch:
             except Exception as e:
                 print(f"Warning: Failed to index {htm_file.name}: {e}", file=sys.stderr)
 
-        # Populate FTS
-        cursor.execute('''
-            INSERT INTO documents_fts(rowid, title, namespace, keywords, content)
-            SELECT id, title, namespace, keywords, content FROM documents
-        ''')
+        return total
 
-        conn.commit()
-        conn.close()
-        print(f"Index built with {total} documents.", file=sys.stderr)
+    # Directories containing device documentation in SIMPL_Windows.chm
+    _SIMPL_WINDOWS_DIRS = ('Device_Library', 'Cards', 'ACards_DM')
+
+    def _build_index_simpl_windows(self, cursor) -> int:
+        """Index SIMPL_Windows CHM (nested device directories with signal tables)."""
+        htm_files = []
+        for subdir in self._SIMPL_WINDOWS_DIRS:
+            d = self.extract_dir / subdir
+            if d.is_dir():
+                htm_files.extend(d.rglob('*.htm'))
+                htm_files.extend(d.rglob('*.html'))
+
+        total = len(htm_files)
+        signal_count = 0
+        slot_count = 0
+
+        for i, htm_file in enumerate(htm_files):
+            if (i + 1) % 500 == 0:
+                print(f"  Indexed {i + 1}/{total} files...", file=sys.stderr)
+
+            try:
+                content = htm_file.read_text(encoding='utf-8', errors='replace')
+                title = extract_title(content)
+                toc_path = extract_toc_path(content)
+                text = html_to_text(content)
+
+                # Build relative path from extract_dir
+                rel_path = str(htm_file.relative_to(self.extract_dir))
+
+                # Extract signals for keyword generation
+                signals = extract_signals_from_table(content)
+                sig_names = ' '.join(s['name'] for s in signals)
+
+                cursor.execute('''
+                    INSERT INTO documents (path, title, namespace, help_id, keywords, content)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    rel_path,
+                    title,
+                    toc_path,
+                    '',  # no help_id for SIMPL Windows
+                    sig_names,
+                    text
+                ))
+                doc_id = cursor.lastrowid
+
+                # Insert signals
+                for sig in signals:
+                    cursor.execute('''
+                        INSERT INTO signals (document_id, signal_name, signal_type, description)
+                        VALUES (?, ?, ?, ?)
+                    ''', (doc_id, sig['name'], sig['signal_type'], sig.get('description', '')))
+                    signal_count += 1
+
+                # Insert slot links
+                slots = extract_slot_links(content)
+                for slot in slots:
+                    # Resolve slot href relative to the current file
+                    # URL-decode the href first (e.g. %20 -> space)
+                    decoded_href = unquote(slot['href'])
+                    slot_path = str((htm_file.parent / decoded_href).resolve().relative_to(self.extract_dir))
+                    cursor.execute('''
+                        INSERT INTO device_slots (parent_document_id, slot_number, slot_name, slot_path)
+                        VALUES (?, ?, ?, ?)
+                    ''', (doc_id, slot['slot_number'], slot['name'], slot_path))
+                    slot_count += 1
+
+            except Exception as e:
+                print(f"Warning: Failed to index {htm_file}: {e}", file=sys.stderr)
+
+        print(f"  {signal_count} signals, {slot_count} slot links extracted.", file=sys.stderr)
+        return total
 
     def parse_toc(self) -> list:
         """Parse the table of contents (HHC file)."""
@@ -565,6 +849,177 @@ class CHMSearch:
         results = [{'path': row[0], 'title': row[1]} for row in cursor.fetchall()]
         conn.close()
         return results
+
+    # ------------------------------------------------------------------
+    # SIMPL Windows query methods
+    # ------------------------------------------------------------------
+
+    def search_signals(self, query: str, signal_type: Optional[str] = None,
+                       limit: int = 20) -> list:
+        """Search SIMPL Windows signal definitions by name or description."""
+        self.ensure_extracted()
+        if not self.db_path.exists():
+            self.build_index()
+
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        # Check if signals table has any data
+        try:
+            cnt = cursor.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+        except Exception:
+            conn.close()
+            return []
+        if cnt == 0:
+            conn.close()
+            return []
+
+        safe_query = query.replace('"', '""')
+
+        if signal_type:
+            cursor.execute('''
+                SELECT s.signal_name, s.signal_type, s.description,
+                       d.title, d.path, d.namespace
+                FROM signals_fts
+                JOIN signals s ON signals_fts.rowid = s.id
+                JOIN documents d ON s.document_id = d.id
+                WHERE signals_fts MATCH ? AND s.signal_type = ?
+                ORDER BY rank
+                LIMIT ?
+            ''', (f'"{safe_query}"', signal_type, limit))
+        else:
+            cursor.execute('''
+                SELECT s.signal_name, s.signal_type, s.description,
+                       d.title, d.path, d.namespace
+                FROM signals_fts
+                JOIN signals s ON signals_fts.rowid = s.id
+                JOIN documents d ON s.document_id = d.id
+                WHERE signals_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+            ''', (f'"{safe_query}"', limit))
+
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'signal_name': row[0],
+                'signal_type': row[1],
+                'description': row[2],
+                'document_title': row[3],
+                'path': row[4],
+                'namespace': row[5],
+            })
+
+        conn.close()
+        return results
+
+    def get_device_signals(self, device_name: str) -> Optional[dict]:
+        """Get all signals for a SIMPL Windows device, grouped by slot."""
+        self.ensure_extracted()
+        if not self.db_path.exists():
+            self.build_index()
+
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        # Find the device document by title (prefer overview pages)
+        cursor.execute('''
+            SELECT id, path, title, namespace, content
+            FROM documents
+            WHERE title LIKE ?
+            ORDER BY
+                CASE
+                    WHEN title = ? THEN 0
+                    WHEN title LIKE ? || ',%' OR title LIKE ? || ' &%' THEN 1
+                    WHEN title LIKE ? THEN 2
+                    ELSE 3
+                END,
+                length(title)
+            LIMIT 1
+        ''', (f'%{device_name}%', device_name,
+              device_name, device_name, f'{device_name}%'))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+
+        doc_id, doc_path, doc_title, namespace, doc_content = row
+
+        result = {
+            'title': doc_title,
+            'path': doc_path,
+            'namespace': namespace,
+            'description': '',
+            'signals': [],
+            'slots': [],
+        }
+
+        # Get device description (first paragraph of plain text)
+        content = self.get_file_content(doc_path)
+        if content:
+            text = html_to_text(content)
+            # Take first few sentences as description
+            sentences = text.split('.')
+            result['description'] = '.'.join(sentences[:3]).strip() + '.' if sentences else ''
+
+        # Get signals directly on this document
+        cursor.execute('''
+            SELECT signal_name, signal_type, description
+            FROM signals WHERE document_id = ?
+            ORDER BY
+                CASE signal_type
+                    WHEN 'digital_input' THEN 1
+                    WHEN 'digital_output' THEN 2
+                    WHEN 'analog_input' THEN 3
+                    WHEN 'analog_output' THEN 4
+                    WHEN 'serial_input' THEN 5
+                    WHEN 'serial_output' THEN 6
+                    WHEN 'parameter' THEN 7
+                END
+        ''', (doc_id,))
+        for srow in cursor.fetchall():
+            result['signals'].append({
+                'name': srow[0], 'type': srow[1], 'description': srow[2]
+            })
+
+        # Get slots
+        cursor.execute('''
+            SELECT slot_number, slot_name, slot_path
+            FROM device_slots WHERE parent_document_id = ?
+            ORDER BY slot_number
+        ''', (doc_id,))
+        for srow in cursor.fetchall():
+            slot = {
+                'slot_number': srow[0],
+                'slot_name': srow[1],
+                'slot_path': srow[2],
+                'signals': []
+            }
+            # Get signals for this slot's document
+            cursor.execute('''
+                SELECT s.signal_name, s.signal_type, s.description
+                FROM signals s
+                JOIN documents d ON s.document_id = d.id
+                WHERE d.path = ?
+                ORDER BY
+                    CASE s.signal_type
+                        WHEN 'digital_input' THEN 1
+                        WHEN 'digital_output' THEN 2
+                        WHEN 'analog_input' THEN 3
+                        WHEN 'analog_output' THEN 4
+                        WHEN 'serial_input' THEN 5
+                        WHEN 'serial_output' THEN 6
+                        WHEN 'parameter' THEN 7
+                    END
+            ''', (srow[2],))
+            for sig in cursor.fetchall():
+                slot['signals'].append({
+                    'name': sig[0], 'type': sig[1], 'description': sig[2]
+                })
+            result['slots'].append(slot)
+
+        conn.close()
+        return result
 
     def show(self, path: str, raw: bool = False) -> Optional[str]:
         """Show the content of a specific document."""
@@ -732,7 +1187,7 @@ class CHMSearch:
 
         row = cursor.fetchone()
         if not row:
-            # Try partial match with all member types
+            # Try partial match with all member types (S#Pro style)
             cursor.execute('''
                 SELECT path, title, namespace, help_id
                 FROM documents
@@ -745,6 +1200,26 @@ class CHMSearch:
                 ORDER BY length(title)
                 LIMIT 1
             ''', (f'%{type_name}%', f'%{type_name}%'))
+            row = cursor.fetchone()
+
+        if not row:
+            # Try SIMPL Windows device name match (no suffix required).
+            # Prefer: exact title → overview pages (title with commas/&) → starts-with
+            cursor.execute('''
+                SELECT path, title, namespace, help_id
+                FROM documents
+                WHERE title LIKE ?
+                ORDER BY
+                    CASE
+                        WHEN title = ? THEN 0
+                        WHEN title LIKE ? || ',%' OR title LIKE ? || ' &%' THEN 1
+                        WHEN title LIKE ? THEN 2
+                        ELSE 3
+                    END,
+                    length(title)
+                LIMIT 1
+            ''', (f'%{type_name}%', type_name,
+                  type_name, type_name, f'{type_name}%'))
             row = cursor.fetchone()
 
         conn.close()
@@ -762,12 +1237,19 @@ class CHMSearch:
         """
         Inspect a type/member and return detailed information including all references.
         This is the core method for understanding API relationships.
+        For SIMPL Windows documents, returns signal definitions instead of code signatures.
         """
         self.ensure_extracted()
 
         # First, resolve the path
         if path_or_name.endswith('.htm'):
-            path = path_or_name if path_or_name.startswith('html/') else f'html/{path_or_name}'
+            # Determine if this is a SIMPL Windows path (not under html/)
+            if path_or_name.startswith('html/'):
+                path = path_or_name
+            elif any(path_or_name.startswith(d) for d in ('Device_Library/', 'Cards/', 'ACards_DM/')):
+                path = path_or_name
+            else:
+                path = f'html/{path_or_name}'
             doc_info = self.get_doc_by_path(path)
         else:
             doc_info = self.find_type(path_or_name)
@@ -780,7 +1262,15 @@ class CHMSearch:
         if not content:
             return None
 
-        # Build comprehensive inspection result
+        # Check if this is a SIMPL Windows document (has signals or is in device dirs)
+        is_simpl_windows = any(
+            path.startswith(d) for d in ('Device_Library/', 'Cards/', 'ACards_DM/')
+        ) if path else False
+
+        if is_simpl_windows:
+            return self._inspect_simpl_windows(doc_info, content, path)
+
+        # Standard S#Pro inspection
         result = {
             'title': doc_info['title'],
             'path': path,
@@ -813,6 +1303,40 @@ class CHMSearch:
                         'category': get_type_category(link_doc.get('help_id', ''), link_doc.get('title', ''))
                     })
 
+        return result
+
+    def _inspect_simpl_windows(self, doc_info: dict, content: str, path: str) -> dict:
+        """Build inspection result for a SIMPL Windows document."""
+        signals = extract_signals_from_table(content)
+        slots = extract_slot_links(content)
+        toc_path = extract_toc_path(content)
+
+        # Build description from first paragraph
+        text = html_to_text(content)
+        sentences = text.split('.')
+        description = '.'.join(sentences[:3]).strip() + '.' if sentences else ''
+
+        result = {
+            'title': doc_info['title'],
+            'path': path,
+            'namespace': toc_path or doc_info.get('namespace', ''),
+            'help_id': '',
+            'category': 'device',
+            'description': description,
+            'signals': signals,
+            'slots': [{'slot_number': s['slot_number'], 'name': s['name'],
+                        'href': s['href']} for s in slots],
+            # Keep empty S#Pro fields for compatibility
+            'signature': None,
+            'parameters': [],
+            'return_type': None,
+            'properties': [],
+            'enum_members': [],
+            'example': None,
+            'has_example': False,
+            'references': [],
+            'all_links': [],
+        }
         return result
 
     def traverse(self, start: str, depth: int = 2, follow_types: Optional[list] = None) -> dict:
@@ -1172,6 +1696,38 @@ class CHMSearch:
         return result
 
 
+def _print_signals(signals: list):
+    """Print signals grouped by type (for CLI output)."""
+    type_labels = {
+        'digital_input': 'Digital Inputs',
+        'digital_output': 'Digital Outputs',
+        'analog_input': 'Analog Inputs',
+        'analog_output': 'Analog Outputs',
+        'serial_input': 'Serial Inputs',
+        'serial_output': 'Serial Outputs',
+        'parameter': 'Parameters',
+    }
+    grouped: dict = {}
+    for s in signals:
+        st = s.get('signal_type') or s.get('type', 'unknown')
+        grouped.setdefault(st, []).append(s)
+
+    for st in ('digital_input', 'digital_output', 'analog_input', 'analog_output',
+               'serial_input', 'serial_output', 'parameter'):
+        sigs = grouped.get(st, [])
+        if not sigs:
+            continue
+        print(f"\n  {type_labels.get(st, st)}:")
+        for s in sigs:
+            name = s.get('name') or s.get('signal_name', '?')
+            desc = s.get('description', '')
+            if len(desc) > 80:
+                desc = desc[:77] + '...'
+            print(f"    {name}")
+            if desc:
+                print(f"      {desc}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description='Search and browse CHM documentation files',
@@ -1504,6 +2060,19 @@ Examples:
                             seen.add(r['title'])
                             print(f"  [{r['category']}] {r['title']}")
                             print(f"    -> {r['path']}")
+
+                # SIMPL Windows signal/slot data
+                if info.get('signals'):
+                    print(f"\nSignals:")
+                    print("-" * 40)
+                    _print_signals(info['signals'])
+
+                if info.get('slots'):
+                    print(f"\nProgramming Slots:")
+                    for s in info['slots']:
+                        print(f"  Slot {s['slot_number']:02d}: {s['name']}")
+                        if s.get('href'):
+                            print(f"    -> {s['href']}")
 
                 if info.get('has_example'):
                     print(f"\n*** This document has a CODE EXAMPLE ***")
