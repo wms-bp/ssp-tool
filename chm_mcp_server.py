@@ -421,6 +421,106 @@ def _device_name_to_spro_candidates(device_name: str) -> list[str]:
     return result
 
 
+import re as _re
+
+
+def _normalize_signal_name(name: str) -> str:
+    """Normalize a signal name for comparison.
+
+    Strips underscores, lowercases, and expands common Crestron abbreviations
+    so that S#Pro 'LevelIn' matches SIMPL 'Level_In', and
+    'ParameterRemoteDoubleTapTime' matches 'RemoteDblTapTime'.
+    """
+    n = _re.sub(r'[_\-\s]', '', name).lower()
+    # Expand common Crestron abbreviations for matching
+    n = n.replace('dbl', 'double')
+    n = n.replace('btn', 'button')
+    n = n.replace('brt', 'bright')
+    n = n.replace('dn', 'down')
+    n = n.replace('fb', 'feedback')
+    return n
+
+
+# Additional normalization: strip verbose S#Pro suffixes for matching
+_SPRO_STRIP_PATTERNS = [
+    # 'ReservedButtonForLocalMode' → 'LocalButton' — needs keyword extraction
+]
+
+
+def _match_spro_member_to_simpl_signal(spro_name: str, simpl_signals: list) -> dict | None:
+    """Find the SIMPL Windows signal that best matches an S#Pro property/method name.
+
+    S#Pro properties often have a 'Parameter' prefix (e.g. 'ParameterRemoteHoldTime')
+    that maps to a SIMPL parameter signal ('RemoteHoldTime' or 'Remote_Hold_Time').
+    Signal properties like 'LevelIn' map to 'Level_In'.
+    Handles abbreviation differences: DoubleTap ↔ DblTap, etc.
+    """
+    # Strip common S#Pro prefixes
+    clean = spro_name
+    for prefix in ('Parameter', 'DeviceLoad'):
+        if clean.startswith(prefix) and len(clean) > len(prefix):
+            clean = clean[len(prefix):]
+
+    norm_spro = _normalize_signal_name(clean)
+
+    best = None
+    best_score = 0
+
+    for sig in simpl_signals:
+        sig_name = sig.get('name') or sig.get('signal_name', '')
+        # Handle range signals: "Recall_Pre_1 through Recall_Pre_3" → use first part
+        base_name = sig_name.split(' through ')[0].strip()
+        norm_simpl = _normalize_signal_name(base_name)
+
+        if norm_spro == norm_simpl:
+            return sig  # exact match
+
+        # Partial/substring match scoring
+        score = 0
+        if norm_spro in norm_simpl or norm_simpl in norm_spro:
+            score = min(len(norm_spro), len(norm_simpl)) / max(len(norm_spro), len(norm_simpl))
+
+        # Keyword overlap: split into words on case boundaries, score by shared words
+        if score < 0.6:
+            spro_words = set(_re.findall(r'[a-z]+|\d+', norm_spro))
+            simpl_words = set(_re.findall(r'[a-z]+|\d+', norm_simpl))
+            if spro_words and simpl_words:
+                overlap = spro_words & simpl_words
+                union = spro_words | simpl_words
+                if overlap:
+                    word_score = len(overlap) / len(union)
+                    score = max(score, word_score)
+
+        if score > best_score:
+            best_score = score
+            best = sig
+
+    return best if best_score > 0.5 else None
+
+
+def _slot_name_from_spro_class(spro_class_name: str, device_class_name: str) -> str:
+    """Extract a SIMPL Windows slot name hint from an S#Pro settings class name.
+
+    E.g. 'ClwDimExDimmerRemoteButtonSettings' with device 'ClwDimFlvExP'
+    → strip common prefixes → 'DimmerRemoteButtonSettings' → 'Dimmer Remote Button Settings'
+    """
+    # The settings class name usually embeds the slot function
+    # Try to extract the meaningful suffix by removing known device-family prefixes
+    name = spro_class_name
+    # Remove 'Class' suffix
+    name = _re.sub(r'\s*Class$', '', name)
+    # Remove common device family prefixes
+    for prefix in ('ClwDimEx', 'ClwDimsw', 'ClwSw', 'Clw', 'Tsw', 'Tpmc', 'Cen'):
+        if name.startswith(prefix) and len(name) > len(prefix) + 3:
+            name = name[len(prefix):]
+            break
+
+    # Insert spaces before uppercase letters (PascalCase → words)
+    spaced = _re.sub(r'([a-z])([A-Z])', r'\1 \2', name)
+    spaced = _re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', spaced)
+    return spaced
+
+
 _SIGNAL_TYPE_MAP = {
     'digital_input': ('BooleanInput', 'BoolInput'),
     'digital_output': ('BooleanOutput', 'BoolOutput'),
@@ -824,6 +924,164 @@ def cross_reference(device_name: str) -> str:
         pass  # S#Pro CHM not available
 
     return _format_cross_reference(device_info, spro_class)
+
+
+@mcp.tool()
+def cross_reference_member(class_name: str, member_name: str) -> str:
+    """Traverse from an S#Pro class member to its SIMPL Windows signal equivalent.
+
+    Given a class and property/method name, resolves the S#Pro member, finds the
+    matching SIMPL Windows device and slot, and maps individual signals between
+    the two systems. Handles naming differences like S#Pro 'LevelIn' matching
+    SIMPL 'Level_In', and 'ParameterRemoteHoldTime' matching 'RemoteHoldTime'.
+
+    Args:
+        class_name: S#Pro class name (e.g. "ClwDimFlvExP")
+        member_name: Property or method name (e.g. "DimmerRemoteButtonSettings",
+                     "DimmingLoads", "LevelIn")
+    """
+    try:
+        spro = _get_searcher('spro')
+    except (RuntimeError, FileNotFoundError):
+        return "SIMPL# Pro CHM not available"
+    try:
+        simpl = _get_searcher('simpl')
+    except (RuntimeError, FileNotFoundError):
+        return "SIMPL Windows CHM not available"
+
+    lines = []
+
+    # 1. Resolve the S#Pro class
+    class_info = spro.inspect(class_name)
+    if not class_info:
+        return f"S#Pro class not found: {class_name}"
+
+    lines.append(f"{'=' * 70}")
+    lines.append(f"Cross-Reference Member: {class_info['title']}.{member_name}")
+    lines.append(f"{'=' * 70}")
+
+    # 2. Find the member - check properties and references
+    member_doc = None
+    member_type_class = None
+
+    # Try direct property lookup
+    search_name = f"{class_name}.{member_name}"
+    member_doc = spro.inspect(search_name)
+
+    # If not found, search by member name alone
+    if not member_doc:
+        results = spro.search_title(f"{class_name} {member_name}", 5)
+        for r in results:
+            if member_name.lower() in r['title'].lower():
+                member_doc = spro.inspect(r['path'])
+                break
+
+    if member_doc:
+        lines.append(f"\nS#Pro Member: {member_doc['title']}")
+        lines.append(f"  Path: {member_doc['path']}")
+        if member_doc.get('description'):
+            lines.append(f"  Description: {member_doc['description']}")
+
+        # If the member has a return/value type, resolve it
+        if member_doc.get('return_type'):
+            rt = member_doc['return_type']
+            lines.append(f"  Type: {rt['name']}")
+            if rt.get('path'):
+                member_type_class = spro.inspect(rt['path'])
+    else:
+        lines.append(f"\nS#Pro member '{member_name}' not found on {class_name}")
+        lines.append(f"Attempting fuzzy match...")
+
+    # 3. Find the SIMPL Windows device
+    device_candidates = _device_name_to_spro_candidates(class_name)
+    # Reverse: try to go from S#Pro name back to device name
+    # ClwDimFlvExP → insert hyphens at case boundaries → CLW-DIM-FLV-EX-P
+    spaced = _re.sub(r'([a-z])([A-Z])', r'\1-\2', class_name)
+    spaced = _re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1-\2', spaced)
+    device_candidates.insert(0, spaced.upper())
+
+    device_info = None
+    for candidate in device_candidates:
+        device_info = simpl.get_device_signals(candidate)
+        if device_info:
+            break
+
+    if not device_info:
+        lines.append(f"\nSIMPL Windows device not found for: {class_name}")
+        return "\n".join(lines)
+
+    lines.append(f"\nSIMPL Windows Device: {device_info['title']}")
+
+    # 4. Collect all SIMPL signals (device-level + all slots)
+    all_simpl_signals = list(device_info.get('signals', []))
+    slot_signals: dict[str, list] = {}
+    for slot in device_info.get('slots', []):
+        sigs = slot.get('signals', [])
+        slot_signals[slot['slot_name']] = sigs
+        all_simpl_signals.extend(sigs)
+
+    # 5. If we resolved a type class (e.g. DimmerRemoteButtonSettings), match its
+    #    members to a specific SIMPL slot and compare signals
+    if member_type_class and member_type_class.get('properties'):
+        slot_hint = _slot_name_from_spro_class(
+            member_type_class['title'], class_name
+        )
+        lines.append(f"\nS#Pro Settings Class: {member_type_class['title']}")
+        lines.append(f"  Slot name hint: \"{slot_hint}\"")
+
+        # Find matching SIMPL slot
+        matched_slot = None
+        norm_hint = _normalize_signal_name(slot_hint)
+        for slot in device_info.get('slots', []):
+            norm_slot = _normalize_signal_name(slot['slot_name'])
+            if norm_hint in norm_slot or norm_slot in norm_hint:
+                matched_slot = slot
+                break
+
+        if matched_slot:
+            lines.append(f"  Matched SIMPL Slot: Slot {matched_slot['slot_number']:02d}: {matched_slot['slot_name']}")
+            lines.append(f"\n  {'S#Pro Property':<45} {'SIMPL Signal':<35} {'Description'}")
+            lines.append(f"  {'─' * 45} {'─' * 35} {'─' * 40}")
+
+            slot_sigs = matched_slot.get('signals', [])
+            spro_props = member_type_class.get('properties', [])
+
+            for prop in spro_props:
+                prop_name = prop['name'].split('.')[-1]  # Remove class prefix
+                if prop_name.endswith(' Property') or prop_name.endswith(' Method'):
+                    continue  # Skip the overview entries
+                match = _match_spro_member_to_simpl_signal(prop_name, slot_sigs)
+                if match:
+                    sig_name = match.get('name') or match.get('signal_name', '?')
+                    desc = match.get('description', '')
+                    if len(desc) > 40:
+                        desc = desc[:37] + '...'
+                    lines.append(f"  {prop_name:<45} {sig_name:<35} {desc}")
+                else:
+                    lines.append(f"  {prop_name:<45} {'(no match)':<35}")
+        else:
+            lines.append(f"  No matching SIMPL slot found for \"{slot_hint}\"")
+
+    # 6. If it's a direct signal property (like LevelIn), find it in SIMPL
+    elif not member_type_class:
+        lines.append(f"\n  Searching SIMPL signals for '{member_name}'...")
+        match = _match_spro_member_to_simpl_signal(member_name, all_simpl_signals)
+        if match:
+            sig_name = match.get('name') or match.get('signal_name', '?')
+            sig_type = match.get('type') or match.get('signal_type', '?')
+            desc = match.get('description', '')
+            spro_t = _SIGNAL_TYPE_MAP.get(sig_type, ('?', '?'))
+
+            lines.append(f"\n  Match found:")
+            lines.append(f"  S#Pro: {member_name}")
+            lines.append(f"  SIMPL: {sig_name} ({sig_type})")
+            lines.append(f"  S#Pro Type: {spro_t[0]}")
+            if desc:
+                lines.append(f"  Description: {desc}")
+        else:
+            lines.append(f"  No matching SIMPL signal found for '{member_name}'")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

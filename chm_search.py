@@ -362,19 +362,40 @@ def _parse_signal_cell(text: str, html_content: str) -> list:
     else:
         return results
 
-    # Extract signal names from angle brackets or bold tags in the HTML
-    # Try bold spans first (more reliable)
+    # Extract signal names from angle-bracket delimited regions in HTML.
+    # The HTML uses literal &lt; &gt; or < > around signal names.
+    # Within those brackets, the name may be split across multiple bold spans
+    # e.g. <span bold>Level</span> <span bold>_Out</span> — we merge them.
     names = []
-    bold_pattern = re.compile(
-        r'<(?:span|b)[^>]*font-weight:\s*bold[^>]*>([^<]+)</(?:span|b)>'
-        r'|<b[^>]*>([^<]+)</b>'
-        r'|<b\s+class="[^"]*join[^"]*">([^<]+)</b>',
-        re.IGNORECASE
+
+    # Strategy: find angle-bracket regions, strip inner HTML tags, get clean name
+    # Match &lt;...&gt; or literal < > regions that contain bold text
+    bracket_pattern = re.compile(
+        r'(?:&lt;|<(?!/?(?:span|b|p|td|tr|table|a|img|br)\b))\s*(.*?)\s*(?:&gt;|>(?!\s*</(?:span|b)))',
+        re.DOTALL | re.IGNORECASE
     )
-    for m in bold_pattern.finditer(html_content):
-        name = (m.group(1) or m.group(2) or m.group(3) or '').strip()
-        if name and name.lower() not in ('signal name and type', 'signal', 'description'):
-            names.append(name)
+    # Simpler approach: extract text between &lt; and &gt; from HTML
+    angle_regions = re.findall(r'&lt;\s*(.*?)\s*&gt;', html_content, re.DOTALL | re.IGNORECASE)
+    for region in angle_regions:
+        # Strip HTML tags from within the region to merge split spans
+        clean = re.sub(r'<[^>]+>', '', region).strip()
+        # Collapse whitespace
+        clean = re.sub(r'\s+', '', clean)
+        if clean and clean.lower() not in ('signal name and type', 'signal', 'description', ''):
+            names.append(clean)
+
+    # Fallback: try bold spans directly
+    if not names:
+        bold_pattern = re.compile(
+            r'<(?:span|b)[^>]*font-weight:\s*bold[^>]*>([^<]+)</(?:span|b)>'
+            r'|<b[^>]*>([^<]+)</b>'
+            r'|<b\s+class="[^"]*join[^"]*">([^<]+)</b>',
+            re.IGNORECASE
+        )
+        for m in bold_pattern.finditer(html_content):
+            name = (m.group(1) or m.group(2) or m.group(3) or '').strip()
+            if name and name.lower() not in ('signal name and type', 'signal', 'description'):
+                names.append(name)
 
     # Fallback: extract from plain text angle brackets  <Name>
     if not names:
@@ -384,21 +405,24 @@ def _parse_signal_cell(text: str, html_content: str) -> list:
                 names.append(n)
 
     # Handle "through" ranges: keep both endpoints as a single entry
-    # e.g. ['Recall_Pre_1', 'Recall_Pre_3'] from "Recall_Pre_1> through <Recall_Pre_3"
     if not names:
-        # No names found — store with the raw text as name
         results.append({'name': text.strip(), 'signal_type': signal_type})
     else:
         # Check for range pattern in text
-        range_match = re.search(
-            r'<[^>]*?([A-Za-z_]+[\-_]?\d+)[^>]*>.*?through.*?<[^>]*?([A-Za-z_]+[\-_]?\d+)[^>]*>',
-            text, re.IGNORECASE
-        )
-        if range_match and len(names) == 2:
-            results.append({
-                'name': f'{names[0]} through {names[1]}',
-                'signal_type': signal_type
-            })
+        if 'through' in text.lower() and len(names) >= 2:
+            # Group into range pairs
+            range_match = re.search(
+                r'<[^>]*?([A-Za-z_]+[\-_]?\d+)[^>]*>.*?through.*?<[^>]*?([A-Za-z_]+[\-_]?\d+)[^>]*>',
+                text, re.IGNORECASE
+            )
+            if range_match and len(names) == 2:
+                results.append({
+                    'name': f'{names[0]} through {names[1]}',
+                    'signal_type': signal_type
+                })
+            else:
+                for name in names:
+                    results.append({'name': name, 'signal_type': signal_type})
         else:
             for name in names:
                 results.append({'name': name, 'signal_type': signal_type})
