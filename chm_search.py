@@ -1060,13 +1060,11 @@ class CHMSearch:
         text = html_to_text(content)
 
         output = []
-        output.append(f"{'=' * 60}")
         output.append(f"Title: {title}")
         if meta.get('namespace'):
             output.append(f"Namespace: {meta['namespace']}")
         if meta.get('help_id'):
             output.append(f"API: {meta['help_id']}")
-        output.append(f"{'=' * 60}")
         output.append("")
         output.append(text)
 

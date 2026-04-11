@@ -588,12 +588,10 @@ def _format_cross_reference(device_info: dict, spro_class: dict | None) -> str:
 
 def _format_class_info(info: dict) -> str:
     lines = []
-    lines.append(f"{'=' * 60}")
     lines.append(f"Class: {info['main']['title']}")
     if info["main"].get("namespace"):
         lines.append(f"Namespace: {info['main']['namespace']}")
     lines.append(f"Path: {info['main']['path']}")
-    lines.append(f"{'=' * 60}")
 
     sections = [
         ("Constructors", info["constructors"]),
@@ -608,7 +606,6 @@ def _format_class_info(info: dict) -> str:
     for section_name, items in sections:
         if items:
             lines.append(f"\n{section_name}:")
-            lines.append("-" * 40)
             for item in items:
                 lines.append(f"  {item['title']}")
                 lines.append(f"    Path: {item['path']}")
@@ -621,11 +618,10 @@ def _format_api_chain(chain: dict) -> str:
         return f"Error: {chain['error']}"
 
     lines = []
-    lines.append(f"{'=' * 70}")
     lines.append(f"API Chain: {chain['start_class']}")
     if chain.get("member"):
         lines.append(f"Member: {chain['member']}")
-    lines.append(f"{'=' * 70}\n")
+    lines.append("")
 
     for item in chain["chain"]:
         indent = "  " * item["level"]
@@ -682,10 +678,9 @@ def _format_browse(results: list, namespace: str) -> str:
 
 def _format_example(result: dict) -> str:
     lines = []
-    lines.append(f"{'=' * 70}")
     lines.append(f"Example: {result['title']}")
     lines.append(f"Namespace: {result['namespace']}")
-    lines.append(f"{'=' * 70}\n")
+    lines.append("")
     lines.append(result["example"])
     return "\n".join(lines)
 
