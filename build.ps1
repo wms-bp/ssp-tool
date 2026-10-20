@@ -13,7 +13,9 @@ Set-Location $ScriptDir
 
 $Version = (Get-Content VERSION).Trim()
 $ChmFile = "SIMPLSharpPro.chm"
-$CrestronChmPath = "C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm"
+$CrestronHelpDir = (Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Crestron Electronics Inc.\Device Database" -Name Help -ErrorAction SilentlyContinue).Help
+if (-not $CrestronHelpDir) { $CrestronHelpDir = "${env:ProgramFiles(x86)}\Crestron\Cresdb\Help" }
+$CrestronChmPath = Join-Path $CrestronHelpDir $ChmFile
 $AppName = "chm-docs"
 
 Write-Host "=== Building $AppName v$Version (Windows) ===" -ForegroundColor Cyan
@@ -32,7 +34,7 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 $pyVersion = python --version 2>&1
 Write-Host "Using: $pyVersion"
 
-# CHM file not required in repo — the server finds it at the Crestron install path on first run.
+# CHM file not required in repo — the server finds it in the Device Database Help folder on first run.
 # But warn if it's not available anywhere (user may be building on a non-Crestron machine).
 if (-not (Test-Path $ChmFile) -and -not (Test-Path $CrestronChmPath)) {
     Write-Host "WARNING: $ChmFile not found in repo or at Crestron install path." -ForegroundColor Yellow

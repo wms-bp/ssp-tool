@@ -15,19 +15,70 @@ from pathlib import Path
 _CHM_CONFIGS = {
     'spro': {
         'name': 'SIMPLSharpPro.chm',
-        'crestron_path': r"C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm",
         'env_var': 'CHM_PATH',
     },
     'simpl': {
         'name': 'SIMPL_Windows.chm',
-        'crestron_path': r"C:\Program Files (x86)\Crestron\Simpl\SIMPL_Windows.chm",
         'env_var': 'SIMPL_CHM_PATH',
     },
 }
 
 # Keep backward compat
 _CHM_NAME = "SIMPLSharpPro.chm"
-_CRESTRON_CHM_PATH = _CHM_CONFIGS['spro']['crestron_path']
+
+# The Crestron Device Database installs the CHM files into its Help folder and records
+# the install paths in the registry. Values to try, most specific first, as
+# (value name, path to append to the value).
+_DEVICE_DB_REG_KEY = r"SOFTWARE\Crestron Electronics Inc.\Device Database"
+_DEVICE_DB_REG_LOOKUPS = [
+    ("Help", ""),
+    ("CrestronDBPath", "Help"),
+]
+
+
+def _read_device_db_reg(value: str) -> str | None:
+    """Read a string value from the Device Database HKLM registry key (32- or 64-bit view)."""
+    import winreg
+
+    for view in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _DEVICE_DB_REG_KEY,
+                                0, winreg.KEY_READ | view) as key:
+                data, _ = winreg.QueryValueEx(key, value)
+        except OSError:
+            continue
+        if isinstance(data, str) and data.strip():
+            return os.path.expandvars(data.strip())
+    return None
+
+
+def _device_db_help_dirs() -> list[Path]:
+    """Candidate Device Database Help directories (Windows only), most reliable first.
+
+    Uses the install paths the Device Database installer writes to the registry,
+    falling back to the default install directory under Program Files (x86).
+    """
+    if platform.system() != "Windows":
+        return []
+
+    dirs = []
+    for value, suffix in _DEVICE_DB_REG_LOOKUPS:
+        data = _read_device_db_reg(value)
+        if data:
+            dirs.append(Path(data) / suffix)
+
+    program_files = os.environ.get("ProgramFiles(x86)") or os.environ.get("ProgramFiles")
+    if program_files:
+        dirs.append(Path(program_files) / "Crestron" / "Cresdb" / "Help")
+
+    unique = []
+    seen = set()
+    for d in dirs:
+        key = os.path.normcase(os.path.normpath(str(d)))
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+    return unique
 
 
 # Read version from VERSION file (bundled or local) — no heavy imports needed
@@ -49,7 +100,7 @@ def _resolve_chm_path(chm_key: str = 'spro') -> str:
     2. CHM_PATH environment variable (legacy, for spro only)
     3. PyInstaller bundle (sys._MEIPASS)
     4. Platform install location (macOS: /usr/local/share, Windows: %LOCALAPPDATA%)
-    5. Crestron database install (Windows only)
+    5. Device Database Help directory (Windows only, located via the registry)
     6. ./<filename>.chm (development fallback)
     """
     cfg = _CHM_CONFIGS.get(chm_key)
@@ -93,9 +144,9 @@ def _resolve_chm_path(chm_key: str = 'spro') -> str:
     if p.exists():
         return str(p)
 
-    # 4. Crestron install (Windows)
-    if platform.system() == "Windows" and cfg.get('crestron_path'):
-        p = Path(cfg['crestron_path'])
+    # 4. Device Database install (Windows)
+    for help_dir in _device_db_help_dirs():
+        p = help_dir / chm_name
         candidates.append(str(p))
         if p.exists():
             return str(p)
@@ -109,13 +160,18 @@ def _resolve_chm_path(chm_key: str = 'spro') -> str:
     # Build error message
     if platform.system() == "Windows":
         install_dir = str(Path(os.environ.get("LOCALAPPDATA", "")) / "chm-docs")
+        hint = (
+            f"Install the Crestron Device Database (the file ships in its Help folder),\n"
+            f"set {cfg['env_var']} to the file's path, or copy it to:\n"
+        )
     else:
         install_dir = "/usr/local/share/chm-docs"
+        hint = f"Set {cfg['env_var']} to the file's path, or copy it to:\n"
 
     msg = (
         f"{chm_name} not found.\n"
         f"\n"
-        f"Copy it to:\n"
+        f"{hint}"
         f"  {install_dir}{os.sep}{chm_name}\n"
         f"\nSearched:\n" +
         "\n".join(f"  - {c}" for c in candidates)

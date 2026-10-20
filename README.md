@@ -23,21 +23,18 @@ Download the latest release for your platform from [Releases](../../releases):
 
 ### 2. Add the CHM files
 
-The CHM files are not included in the release. Copy them to the app's data directory:
+The CHM files are not included in the release.
 
-**macOS:**
+**Windows:** No copying needed if the Crestron Device Database is installed. Both files ship in its `Help` folder, and the tool finds that folder through the registry entries the Device Database installer writes (`HKLM\SOFTWARE\Crestron Electronics Inc.\Device Database`), so non-default install directories work too. The tool checks these locations in order:
+1. The `CHM_PATH` (S#Pro) or `SIMPL_CHM_PATH` (SIMPL Windows) environment variable
+2. `%LOCALAPPDATA%\chm-docs\` (copies placed here take precedence over the Device Database)
+3. The Device Database `Help` folder (normally `C:\Program Files (x86)\Crestron\Cresdb\Help`)
+
+**macOS:** Copy them to the app's data directory:
 ```bash
 sudo cp SIMPLSharpPro.chm /usr/local/share/chm-docs/
 sudo cp SIMPL_Windows.chm /usr/local/share/chm-docs/   # optional
 ```
-
-**Windows:** The tool checks these locations in order:
-1. `%LOCALAPPDATA%\chm-docs\SIMPLSharpPro.chm`
-2. `C:\Program Files (x86)\Crestron\Cresdb\Help\SIMPLSharpPro.chm` (auto-detected if Crestron DB is installed)
-
-For SIMPL Windows:
-1. `%LOCALAPPDATA%\chm-docs\SIMPL_Windows.chm`
-2. `C:\Program Files (x86)\Crestron\Simpl\SIMPL_Windows.chm`
 
 If a CHM can't be found, the tool prints an error showing exactly where it looked. The S#Pro CHM is required; the SIMPL Windows CHM is optional but enables signal descriptions and cross-referencing.
 
@@ -307,7 +304,7 @@ winget install JRSoftware.InnoSetup   # installer builder
 - `/usr/local/bin/chm-docs` — launcher
 
 **Windows (installer):**
-- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM files here)
+- `%LOCALAPPDATA%\chm-docs\` — application bundle (also accepts CHM files here, which take precedence over the Device Database)
 
 To upgrade, install the new package over the previous one.
 
