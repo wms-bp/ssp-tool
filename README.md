@@ -65,7 +65,7 @@ chm-docs --version
 
 ### 5. First run
 
-The search index cache is built automatically on first run (~1 minute per CHM). After that, all queries are instant.
+The search index cache is built automatically on first run (~1 minute per CHM). After that, all queries are instant. When a CHM file is updated, the index is rebuilt automatically (see [Cache](#cache)).
 
 ## MCP Tools
 
@@ -315,10 +315,24 @@ To upgrade, install the new package over the previous one.
 
 Extracted CHM files and search index are cached at:
 ```
-~/.cache/chm-search/chm_<hash>/
+~/.cache/chm-search/chm_<path hash>_<version hash>/
 ```
 
-To rebuild the index:
+When a CHM file changes (new size or modified time, e.g. after a Crestron update), the MCP server keeps answering from the old index while it builds a new one in the background, then switches over and deletes the old cache. Results from the old index include a note saying so.
+
+Re-indexing takes a few minutes. To turn it off, set `CHM_AUTO_REINDEX=0`. The old index is then used, with a note that it is out of date, until you rebuild it yourself:
+```json
+{
+  "mcpServers": {
+    "chm-docs": {
+      "command": "%LOCALAPPDATA%\\chm-docs\\chm-docs.exe",
+      "env": { "CHM_AUTO_REINDEX": "0" }
+    }
+  }
+}
+```
+
+To extract and re-index SIMPLSharpPro.chm and SIMPL_Windows.chm manually:
 ```bash
 chm-docs rebuild
 ```

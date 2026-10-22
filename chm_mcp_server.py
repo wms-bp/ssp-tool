@@ -132,6 +132,20 @@ def _run_cli(argv: list[str]):
     """Run in CLI mode by delegating to chm_search.main() with resolved CHM path."""
     from chm_search import main as cli_main
 
+    # 'rebuild' without --chm rebuilds both SIMPLSharpPro.chm and SIMPL_Windows.chm (those that are found)
+    if argv and argv[0] == 'rebuild':
+        chm_paths = []
+        for key in _CHM_CONFIGS:
+            try:
+                chm_paths.append(_resolve_chm_path(key))
+            except FileNotFoundError:
+                pass
+        for chm_path in chm_paths:
+            print(f"Rebuilding {Path(chm_path).name}", file=sys.stderr)
+            cli_main(["--chm", chm_path] + argv)
+        if chm_paths:
+            return
+
     chm_path = _resolve_chm_path('spro')
     cli_main(["--chm", chm_path] + argv)
 
@@ -152,12 +166,14 @@ if __name__ == "__main__":
 # MCP server setup — only runs if no CLI args (MCP mode) or imported as module
 # ---------------------------------------------------------------------------
 
+import contextvars
+import functools
 import io
 import threading
 
 from mcp.server.fastmcp import FastMCP
 
-from chm_search import CHMSearch
+from chm_search import CHMSearch, auto_reindex_enabled
 
 
 # On Windows without a console, sys.stderr may be None — ensure it's usable
@@ -210,21 +226,82 @@ mcp._mcp_server.version = __version__
 
 _searcher_lock = threading.Lock()
 _searchers: dict[str, CHMSearch] = {}
+# CHM keys serving an out-of-date index while a new one is built in the background
+_reindexing: set[str] = set()
+# CHM keys used by the current tool call, for the out-of-date notice
+_used_chms: contextvars.ContextVar[set | None] = contextvars.ContextVar('_used_chms', default=None)
 
 
 def _get_searcher(chm: str = 'spro') -> CHMSearch:
-    """Lazy-init a CHMSearch instance for the given CHM key. Thread-safe."""
+    """Lazy-init a CHMSearch instance for the given CHM key. Thread-safe.
+
+    If the CHM file has changed since it was indexed, the old index is served
+    until _reindex() has built a new one.
+    """
     with _searcher_lock:
         if chm not in _searchers:
             try:
                 chm_path = _resolve_chm_path(chm)
             except FileNotFoundError as e:
                 raise RuntimeError(str(e))
-            instance = CHMSearch(chm_path)
-            instance.ensure_extracted()
-            instance.build_index()
+            instance = CHMSearch(chm_path, allow_stale=True)
+            if instance.stale:
+                if auto_reindex_enabled():
+                    _reindexing.add(chm)
+            else:
+                instance.ensure_extracted()
+                instance.build_index()
+                instance.remove_old_caches()
             _searchers[chm] = instance
+        elif _searchers[chm].stale:
+            # Another chm-docs process may have finished re-indexing first and
+            # deleted the old cache, so switch to its index
+            current = CHMSearch(str(_searchers[chm].chm_path), allow_stale=True)
+            if not current.stale:
+                _searchers[chm] = current
+        used = _used_chms.get()
+        if used is not None:
+            used.add(chm)
         return _searchers[chm]
+
+
+def _reindex(chm: str):
+    """Build the index for the current version of a CHM file and switch to it."""
+    try:
+        fresh = CHMSearch(str(_searchers[chm].chm_path))
+        fresh.ensure_extracted()
+        fresh.build_index()
+        with _searcher_lock:
+            _searchers[chm] = fresh
+        fresh.remove_old_caches()
+    finally:
+        _reindexing.discard(chm)
+
+
+def _stale_notice(chm: str) -> str | None:
+    searcher = _searchers.get(chm)
+    if not searcher or not searcher.stale:
+        return None
+    name = searcher.chm_path.name
+    if chm in _reindexing:
+        return (f"Note: {name} has been updated and is being re-indexed in the background. "
+                f"These results come from the previous version.")
+    return (f"Note: the index for {name} is out of date (the file or chm-docs has been updated). "
+            f"Run `chm-docs rebuild` to update it.")
+
+
+def _tool(fn):
+    """Register an MCP tool, adding a note to its output if it used an out-of-date index."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        token = _used_chms.set(set())
+        try:
+            result = fn(*args, **kwargs)
+            notices = [n for n in map(_stale_notice, sorted(_used_chms.get())) if n]
+        finally:
+            _used_chms.reset(token)
+        return "\n\n".join([result] + notices)
+    return mcp.tool()(wrapper)
 
 
 # ---------------------------------------------------------------------------
@@ -689,13 +766,13 @@ def _format_example(result: dict) -> str:
 # MCP Tool definitions
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool
 def version() -> str:
     """Return the chm-docs server version."""
     return f"chm-docs {__version__}"
 
 
-@mcp.tool()
+@_tool
 def search(query: str, limit: int = 20, chm: str = 'spro') -> str:
     """Full-text keyword search across Crestron documentation.
 
@@ -712,7 +789,7 @@ def search(query: str, limit: int = 20, chm: str = 'spro') -> str:
     return _format_search_results(results, query)
 
 
-@mcp.tool()
+@_tool
 def search_title(query: str, limit: int = 20, chm: str = 'spro') -> str:
     """Search only in document titles for precise type/member/device lookup.
 
@@ -729,7 +806,7 @@ def search_title(query: str, limit: int = 20, chm: str = 'spro') -> str:
     return _format_title_results(results, query)
 
 
-@mcp.tool()
+@_tool
 def inspect(type_name: str, chm: str = 'spro') -> str:
     """Detailed view of any SDK type/member or SIMPL Windows device.
 
@@ -749,7 +826,7 @@ def inspect(type_name: str, chm: str = 'spro') -> str:
     return _format_inspect(info)
 
 
-@mcp.tool()
+@_tool
 def get_class_info(class_name: str, chm: str = 'spro') -> str:
     """Get a class overview with all its members grouped by category.
 
@@ -772,7 +849,7 @@ def get_class_info(class_name: str, chm: str = 'spro') -> str:
     return _format_class_info(info)
 
 
-@mcp.tool()
+@_tool
 def api_chain(class_name: str, member_name: str | None = None) -> str:
     """Follow an event/property/method chain through the SDK type system.
 
@@ -789,7 +866,7 @@ def api_chain(class_name: str, member_name: str | None = None) -> str:
     return _format_api_chain(chain)
 
 
-@mcp.tool()
+@_tool
 def browse_namespace(namespace: str, limit: int = 50, chm: str = 'spro') -> str:
     """List all types within a specific namespace or category.
 
@@ -806,7 +883,7 @@ def browse_namespace(namespace: str, limit: int = 50, chm: str = 'spro') -> str:
     return _format_browse(results, namespace)
 
 
-@mcp.tool()
+@_tool
 def list_namespaces(chm: str = 'spro') -> str:
     """List all available namespaces/categories in the documentation.
 
@@ -821,7 +898,7 @@ def list_namespaces(chm: str = 'spro') -> str:
     return _format_namespaces(results)
 
 
-@mcp.tool()
+@_tool
 def get_example(type_name: str) -> str:
     """Get the C# code example for a specific SDK type.
 
@@ -835,7 +912,7 @@ def get_example(type_name: str) -> str:
     return _format_example(result)
 
 
-@mcp.tool()
+@_tool
 def show_document(path: str, chm: str = 'spro') -> str:
     """Read the full formatted text of any document by its path.
 
@@ -857,7 +934,7 @@ def show_document(path: str, chm: str = 'spro') -> str:
 # SIMPL Windows-specific tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool
 def search_signals(query: str, signal_type: str | None = None, limit: int = 20) -> str:
     """Search SIMPL Windows signal definitions by name or description.
 
@@ -876,7 +953,7 @@ def search_signals(query: str, signal_type: str | None = None, limit: int = 20) 
     return _format_signal_search(results, query)
 
 
-@mcp.tool()
+@_tool
 def get_device_signals(device_name: str) -> str:
     """Get all signals (inputs, outputs, parameters) for a SIMPL Windows device.
 
@@ -895,7 +972,7 @@ def get_device_signals(device_name: str) -> str:
     return _format_device_signals(info)
 
 
-@mcp.tool()
+@_tool
 def cross_reference(device_name: str) -> str:
     """Cross-reference a SIMPL Windows device with its SIMPL# Pro equivalent.
 
@@ -931,7 +1008,7 @@ def cross_reference(device_name: str) -> str:
     return _format_cross_reference(device_info, spro_class)
 
 
-@mcp.tool()
+@_tool
 def cross_reference_member(class_name: str, member_name: str) -> str:
     """Traverse from an S#Pro class member to its SIMPL Windows signal equivalent.
 
@@ -1195,12 +1272,18 @@ def _find_simpl_device(simpl, class_name: str):
 if __name__ == "__main__":
     # Warm cache in background so the MCP server starts immediately.
     # If a CHM is missing, the error surfaces through tool calls.
+    # Indexes of updated CHM files are rebuilt afterwards, while the old ones are served.
     def _warm_cache():
         for key in _CHM_CONFIGS:
             try:
                 _get_searcher(key)
             except (FileNotFoundError, RuntimeError) as e:
                 print(f"chm-docs: [{key}] {e}", file=sys.stderr)
+        for key in list(_reindexing):
+            try:
+                _reindex(key)
+            except Exception as e:
+                print(f"chm-docs: [{key}] re-indexing failed: {e}", file=sys.stderr)
 
     threading.Thread(target=_warm_cache, daemon=True).start()
 

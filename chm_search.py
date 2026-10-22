@@ -20,6 +20,20 @@ from typing import Optional
 from urllib.parse import unquote
 import sqlite3
 import hashlib
+import time
+
+# Bump when the extracted layout or index format changes, so existing caches are rebuilt.
+CACHE_VERSION = 1
+
+
+def auto_reindex_enabled() -> bool:
+    """Whether to re-index automatically when a CHM file has changed.
+
+    On by default. Set CHM_AUTO_REINDEX=0 to keep using the old index until
+    the user runs `rebuild`.
+    """
+    value = os.environ.get('CHM_AUTO_REINDEX', '1').strip().lower()
+    return value not in ('0', 'false', 'no', 'off')
 
 
 class HTMLTextExtractor(HTMLParser):
@@ -458,7 +472,13 @@ def extract_slot_links(html_content: str) -> list:
 class CHMSearch:
     """Main CHM search functionality."""
 
-    def __init__(self, chm_path: str, cache_dir: Optional[str] = None):
+    def __init__(self, chm_path: str, cache_dir: Optional[str] = None, allow_stale: bool = False):
+        """Open a CHM file and pick its cache folder.
+
+        With allow_stale=True, an index built from an older version of the file
+        is used when the current version has not been indexed yet, and
+        self.stale is set. Call rebuild() on a new instance to update it.
+        """
         self.chm_path = Path(chm_path).resolve()
         if not self.chm_path.exists():
             raise FileNotFoundError(f"CHM file not found: {chm_path}")
@@ -470,31 +490,83 @@ class CHMSearch:
             self.cache_dir = Path.home() / '.cache' / 'chm-search'
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create a hash-based directory for this specific CHM
-        chm_hash = hashlib.md5(str(self.chm_path).encode()).hexdigest()[:12]
-        self.extract_dir = self.cache_dir / f"chm_{chm_hash}"
+        # One cache folder per CHM path and file version: chm_<path hash>_<version hash>.
+        # An updated CHM file (new size or modified time) gets a new folder, and the
+        # old one is kept until the new one is ready.
+        path_hash = hashlib.md5(str(self.chm_path).encode()).hexdigest()[:12]
+        st = self.chm_path.stat()
+        version_hash = hashlib.md5(
+            f"{CACHE_VERSION}:{st.st_size}:{st.st_mtime_ns}".encode()).hexdigest()[:8]
+        self._cache_prefix = f"chm_{path_hash}"
+        self.extract_dir = self.cache_dir / f"{self._cache_prefix}_{version_hash}"
+
+        self.stale = False
+        if allow_stale and not (self.extract_dir / "index.db").exists():
+            previous = [d for d in self._old_caches() if (d / "index.db").exists()]
+            if previous:
+                self.extract_dir = max(previous, key=lambda d: (d / "index.db").stat().st_mtime)
+                self.stale = True
 
         self.db_path = self.extract_dir / "index.db"
         self.toc = []
         self.keywords = {}
 
+    def _old_caches(self) -> list[Path]:
+        """Cache folders for this CHM path other than the one in use (older versions)."""
+        return [d for d in self.cache_dir.glob(f"{self._cache_prefix}*")
+                if d.is_dir() and d != self.extract_dir and '.tmp' not in d.name]
+
+    def remove_old_caches(self):
+        """Delete caches of older versions of this CHM file, once the current one is built."""
+        if self.stale or not self.db_path.exists():
+            return
+        for d in self._old_caches():
+            shutil.rmtree(d, ignore_errors=True)
+        # Leftovers from interrupted extractions
+        for d in self.cache_dir.glob(f"{self._cache_prefix}*.tmp*"):
+            if d.is_dir() and time.time() - d.stat().st_mtime > 3600:
+                shutil.rmtree(d, ignore_errors=True)
+
     def ensure_extracted(self):
         """Ensure CHM content is extracted."""
-        if not self.extract_dir.exists():
-            print("Extracting CHM file to cache... (this may take a moment)", file=sys.stderr)
-            self.extract_dir.mkdir(parents=True, exist_ok=True)
+        if self.extract_dir.exists():
+            return
+        print("Extracting CHM file to cache... (this may take a moment)", file=sys.stderr)
+        # Extract into a temporary folder and rename it when done, so an interrupted
+        # extraction never looks like a finished one.
+        tmp_dir = self.extract_dir.with_name(f"{self.extract_dir.name}.tmp-{os.getpid()}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        tmp_dir.mkdir(parents=True)
+        try:
+            self._extract_chm(tmp_dir)
             try:
-                self._extract_chm()
-            except Exception:
-                # Clean up partial extraction on failure
-                shutil.rmtree(self.extract_dir, ignore_errors=True)
-                raise
-            print("Extraction complete.", file=sys.stderr)
+                tmp_dir.rename(self.extract_dir)
+            except OSError:
+                # Another process finished extracting the same file first
+                if not self.extract_dir.exists():
+                    raise
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        print("Extraction complete.", file=sys.stderr)
 
-    def _extract_chm(self):
+    def _extract_chm(self, target_dir: Path):
         """Extract CHM using vendored chmlib C extension."""
         from chmextract import extract_chm
-        extract_chm(str(self.chm_path), str(self.extract_dir))
+        extract_chm(str(self.chm_path), str(target_dir))
+
+    def rebuild(self):
+        """Extract the CHM file again and rebuild the index from scratch."""
+        if self.extract_dir.exists():
+            # Move the old cache aside first. On Windows, if a file in it is in use,
+            # the rename fails and the cache is left intact.
+            old_dir = self.extract_dir.with_name(f"{self.extract_dir.name}.tmp-old-{os.getpid()}")
+            self.extract_dir.rename(old_dir)
+            shutil.rmtree(old_dir, ignore_errors=True)
+        self.ensure_extracted()
+        self.build_index(force=True)
+        self.remove_old_caches()
 
     def get_file_content(self, relative_path: str) -> Optional[str]:
         """Get content of a file from the extracted CHM."""
@@ -1795,7 +1867,7 @@ Examples:
     show_parser.add_argument('--raw', action='store_true', help='Show raw HTML')
 
     # Rebuild index command
-    rebuild_parser = subparsers.add_parser('rebuild', help='Rebuild the search index')
+    rebuild_parser = subparsers.add_parser('rebuild', help='Extract the CHM again and rebuild the search index')
 
     # TOC command
     toc_parser = subparsers.add_parser('toc', help='Show table of contents')
@@ -1852,7 +1924,11 @@ Examples:
         sys.exit(1)
 
     try:
-        chm = CHMSearch(args.chm)
+        chm = CHMSearch(args.chm, allow_stale=args.command != 'rebuild' and not auto_reindex_enabled())
+        if chm.stale:
+            print(f"Note: the index for {chm.chm_path.name} is out of date. "
+                  f"Run 'rebuild' to update it.", file=sys.stderr)
+        chm.remove_old_caches()
 
         if args.command in ('search', 's'):
             results = chm.search(args.query, args.limit)
@@ -1920,7 +1996,7 @@ Examples:
                 sys.exit(1)
 
         elif args.command == 'rebuild':
-            chm.build_index(force=True)
+            chm.rebuild()
 
         elif args.command == 'toc':
             toc = chm.parse_toc()
