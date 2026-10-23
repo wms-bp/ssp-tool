@@ -20,6 +20,26 @@ Download the latest release for your platform from [Releases](../../releases):
 
 - **macOS:** `chm-docs-X.Y.Z.pkg` — double-click or `sudo installer -pkg chm-docs-*.pkg -target /`
 - **Windows:** `chm-docs-X.Y.Z-setup.exe` — run the installer
+- **MCP bundle (Windows and macOS):** `chm-docs-X.Y.Z.mcpb` — see [MCP bundle](#mcp-bundle) below
+
+### MCP bundle
+
+The `.mcpb` file contains the MCP server for Windows and macOS, without an installer:
+
+- **Claude Desktop (as an extension):**
+  - **Team and Enterprise plans:** an Owner or Primary Owner uploads the file once in the organization's extension settings. Members then install it with one click.
+  - **Your own account (for testing):** Settings > Extensions > Advanced settings > Extension developer > Install extension, then select the file. This is a developer tool, and Claude Desktop shows a warning for any extension installed this way.
+
+  Claude Desktop asks for the CHM file paths. On Windows they can be left empty when the Crestron Device Database is installed. Tools need approval on first use unless you allow them in the extension's settings.
+- **Claude Code (in a plugin):** point the plugin's `mcpServers` at the file or its release URL, and Claude Code downloads and unpacks it:
+  ```json
+  {
+    "name": "simplsharp-help",
+    "mcpServers": "https://github.com/wms-bp/ssp-tool/releases/download/vX.Y.Z/chm-docs-X.Y.Z.mcpb"
+  }
+  ```
+
+The bundle only contains the MCP server. For the `chm-docs` command line, use the installer.
 
 ### 2. Add the CHM files
 
@@ -297,6 +317,11 @@ sudo installer -pkg chm-docs-*.pkg -target /
 winget install JRSoftware.InnoSetup   # installer builder
 .\build.ps1
 # Run chm-docs-X.Y.Z-setup.exe
+```
+
+Both build scripts also create an MCP bundle for their own platform (`chm-docs-X.Y.Z-windows.mcpb` or `chm-docs-X.Y.Z-macos.mcpb`). The release workflow combines both builds into one `chm-docs-X.Y.Z.mcpb`. To package existing builds yourself:
+```bash
+python make_mcpb.py --windows <windows dist/chm-docs> --macos <macOS dist/chm-docs>
 ```
 
 ### Install locations

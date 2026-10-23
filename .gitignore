@@ -29,6 +29,7 @@ win-payload/
 *.pkg
 *.spec
 *-setup.exe
+*.mcpb
 
 # OS
 .DS_Store

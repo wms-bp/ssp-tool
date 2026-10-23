@@ -35,9 +35,9 @@ if [ ! -d "$VENV" ]; then
 fi
 source "${VENV}/bin/activate"
 
-if ! python -c "import mcp" &>/dev/null || ! python -c "import PyInstaller" &>/dev/null; then
+if ! python -c "import mcp.server.fastmcp" &>/dev/null || ! python -c "import PyInstaller" &>/dev/null; then
     echo "Installing build dependencies..."
-    pip install --quiet mcp pyinstaller setuptools
+    pip install --quiet "mcp<2" pyinstaller setuptools
 fi
 
 echo "All prerequisites met."
@@ -86,6 +86,14 @@ python -m PyInstaller \
     chm_mcp_server.py
 
 echo "PyInstaller build complete."
+echo ""
+
+# ---------------------------------------------------------------------------
+# 3b. MCP bundle (.mcpb) for Claude Desktop and Claude Code plugins
+# ---------------------------------------------------------------------------
+echo "--- Creating MCP bundle ---"
+
+python make_mcpb.py --macos dist/chm-docs
 echo ""
 
 # ---------------------------------------------------------------------------

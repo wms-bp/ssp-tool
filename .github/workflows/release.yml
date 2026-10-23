@@ -36,6 +36,16 @@ jobs:
           name: macos-pkg
           path: chm-docs-*.pkg
 
+      # tar keeps the executable flag, which upload-artifact drops
+      - name: Archive app folder for the MCP bundle
+        run: tar -czf macos-app.tar.gz -C dist chm-docs
+
+      - name: Upload app folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: macos-app.tar.gz
+
   build-windows:
     runs-on: windows-latest
     steps:
@@ -54,14 +64,41 @@ jobs:
           name: windows-setup
           path: chm-docs-*-setup.exe
 
+      - name: Upload app folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: dist/chm-docs/
+
   release:
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
-          merge-multiple: true
+          name: macos-pkg
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-setup
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-app
+          path: windows-app
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-app
+
+      - name: Create MCP bundle (Windows and macOS)
+        run: |
+          mkdir macos-app
+          tar -xzf macos-app.tar.gz -C macos-app
+          python3 make_mcpb.py --windows windows-app --macos macos-app/chm-docs
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -69,4 +106,5 @@ jobs:
           files: |
             chm-docs-*.pkg
             chm-docs-*-setup.exe
+            chm-docs-*.mcpb
           generate_release_notes: true

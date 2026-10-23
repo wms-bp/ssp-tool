@@ -51,13 +51,13 @@ if (-not (Test-Path $Venv)) {
 & "$Venv\Scripts\Activate.ps1"
 
 # Install build dependencies
-python -c "import mcp" 2>$null
+python -c "import mcp.server.fastmcp" 2>$null
 $mcpMissing = $LASTEXITCODE -ne 0
 python -c "import PyInstaller" 2>$null
 $pyiMissing = $LASTEXITCODE -ne 0
 if ($mcpMissing -or $pyiMissing) {
     Write-Host "Installing build dependencies..."
-    pip install --quiet mcp pyinstaller setuptools
+    pip install --quiet "mcp<2" pyinstaller setuptools
 }
 
 Write-Host "All prerequisites met."
@@ -110,6 +110,18 @@ python -m PyInstaller `
     chm_mcp_server.py
 
 Write-Host "PyInstaller build complete."
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# 3b. MCP bundle (.mcpb) for Claude Desktop and Claude Code plugins
+# ---------------------------------------------------------------------------
+Write-Host "--- Creating MCP bundle ---"
+
+python make_mcpb.py --windows "dist\$AppName"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to create MCP bundle"
+    exit 1
+}
 Write-Host ""
 
 # ---------------------------------------------------------------------------
